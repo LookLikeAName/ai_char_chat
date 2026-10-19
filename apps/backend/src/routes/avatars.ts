@@ -6,17 +6,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import {
-  avatarImageGenerateSchema,
-  avatarInputSchema,
-  fieldMeta,
-  isPersonaEmpty,
-  missingFields,
-  personaCheckSchema,
-  personaGenerateSchema,
-  sanitizeDraft,
-  type PersonaDraft,
-} from '@acc/shared';
+import { avatarImageGenerateSchema, avatarInputSchema, personaCheckSchema, personaGenerateSchema } from '@acc/shared';
 import { avatars, conversationMembers, conversations } from '../db/schema.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError, notFound, parseBody } from '../errors.ts';
@@ -24,32 +14,14 @@ import { generateImage } from '../images/generate.ts';
 import { LlmError } from '../llm/index.ts';
 import { checkPersona } from '../persona/check.ts';
 import { generatePersona } from '../persona/generate.ts';
-import { avatarToDto } from '../services/avatars.ts';
+import { avatarToDto, validatePersona } from '../services/avatars.ts';
 import { assertProfileExists, getProfile, resolveRow } from '../services/llmProfiles.ts';
 import { getRelationship } from '../relationship/service.ts';
 import { loadSettings } from '../services/settings.ts';
 
 const idParams = z.object({ id: z.uuid() });
 
-/**
- * 人格設定要嘛全空（只靠簡介），要嘛全部填滿；有不合法的值或缺欄位就拒絕。
- * undefined 表示不變更。
- */
-function validatePersona(input: Record<string, unknown> | undefined): PersonaDraft | undefined {
-  if (input === undefined) return undefined;
-  const { draft, errors } = sanitizeDraft(input);
-  const bad = Object.entries(errors)[0];
-  if (bad) throw new HttpError(400, `${fieldMeta(bad[0])?.label ?? bad[0]}：${bad[1]}`);
-  if (isPersonaEmpty(draft)) return {};
-  const missing = missingFields(draft);
-  if (missing.length) {
-    const names = missing.slice(0, 5).map((p) => fieldMeta(p)?.label ?? p);
-    throw new HttpError(400, `人格設定還有 ${missing.length} 個欄位沒填（${names.join('、')}${missing.length > 5 ? '…' : ''}），可以用「AI 補完」填滿`);
-  }
-  return draft;
-}
-
-const IMAGE_TYPES: Record<string, string> = {
+export const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',

@@ -19,6 +19,7 @@ import { healthRoutes } from './routes/health.ts';
 import { llmProfileRoutes } from './routes/llmProfiles.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
+import { transferRoutes } from './routes/transfer.ts';
 import { usageRoutes } from './routes/usage.ts';
 import { QuotaError } from './services/usage.ts';
 import { WsHub } from './ws.ts';
@@ -77,6 +78,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(profileRoutes);
       await api.register(debugRoutes);
       await api.register(usageRoutes);
+      await api.register(transferRoutes);
     },
     { prefix: '/api' },
   );

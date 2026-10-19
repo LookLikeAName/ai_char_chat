@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
+import { ExportDialog, ImportDialog } from '../../components/TransferDialogs.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { AvatarEditor } from './AvatarEditor.tsx';
 
@@ -10,12 +12,21 @@ export function AvatarsPage() {
   const { data: avatars = [], isLoading } = useQuery({ queryKey: qk.avatars, queryFn: api.avatars });
   const current = avatars.find((a) => a.id === avatarId);
   const isNew = avatarId === 'new';
+  const [dialog, setDialog] = useState<'import' | 'export' | null>(null);
 
   return (
     <div className={`two-pane${avatarId ? ' has-selection' : ''}`}>
       <aside className="chat-list" aria-label="Avatar 列表">
         <div className="chat-list-head">
           <h1 className="pane-title">Avatar</h1>
+          <button className="icon-btn" onClick={() => setDialog('import')} title="匯入" aria-label="匯入 avatar">
+            <Icon name="upload" />
+          </button>
+          {avatars.length > 0 && (
+            <button className="icon-btn" onClick={() => setDialog('export')} title="全部匯出" aria-label="匯出全部 avatar">
+              <Icon name="download" />
+            </button>
+          )}
           <Link to="/avatars/new" className="icon-btn" title="新增 avatar" aria-label="新增 avatar">
             <Icon name="plus" />
           </Link>
@@ -35,6 +46,8 @@ export function AvatarsPage() {
             </Link>
           ))}
         </div>
+        {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} />}
+        {dialog === 'export' && <ExportDialog avatar={null} onClose={() => setDialog(null)} />}
       </aside>
       <main className="pane-main">
         {isNew ? (

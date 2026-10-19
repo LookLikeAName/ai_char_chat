@@ -26,6 +26,8 @@ import type {
   InstrumentId,
   GroupInput,
   UsageSummaryDto,
+  ImportRequest,
+  ImportResultDto,
 } from '@acc/shared';
 
 export class ApiError extends Error {
@@ -108,6 +110,9 @@ export const api = {
   setSummary: (summary: string) => request<ProfileDto>('PUT', '/api/profile/summary', { summary }),
   generateSummary: () => request<ProfileDto>('POST', '/api/profile/summary/generate'),
 
+  exportUrl: (avatarId: string | null, opts: { memories: boolean; history: boolean }) =>
+    `/api/avatars/${avatarId ? `${avatarId}/` : ''}export${query({ memories: String(opts.memories), history: String(opts.history) })}`,
+  importAvatars: (input: ImportRequest) => request<ImportResultDto>('POST', '/api/avatars/import', input),
   usage: (days: number) => request<UsageSummaryDto>('GET', `/api/usage?days=${days}`),
 
   avatarState: (id: string) => request<AvatarStateDto>('GET', `/api/avatars/${id}/state`),

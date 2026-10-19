@@ -2916,3 +2916,20 @@ fieldset.field {
   color: inherit;
   text-decoration: none;
 }
+
+.import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.import-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

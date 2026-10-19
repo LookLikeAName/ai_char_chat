@@ -17,6 +17,7 @@ import {
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
+import { ExportDialog } from '../../components/TransferDialogs.tsx';
 import { PersonaEditor, type PersonaState } from '../../components/persona/PersonaEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -42,6 +43,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   });
   const [llm, setLlm] = useState<LlmBinding | null>(avatar?.llm ?? null);
   const [initialStage, setInitialStage] = useState<InitialStage>('stranger');
+  const [exporting, setExporting] = useState(false);
   const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
 
   const empty = isPersonaEmpty(p.persona);
@@ -102,11 +104,17 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
         </Link>
         <h1>{avatar ? `編輯 ${avatar.name}` : '新增 avatar'}</h1>
         {avatar && (
-          <Link className="btn" to={`/chats/${avatar.dmConversationId}`}>
-            <Icon name="chat" size={16} /> 聊天
-          </Link>
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setExporting(true)}>
+              <Icon name="download" size={16} /> 匯出
+            </button>
+            <Link className="btn" to={`/chats/${avatar.dmConversationId}`}>
+              <Icon name="chat" size={16} /> 聊天
+            </Link>
+          </>
         )}
       </header>
+      {exporting && avatar && <ExportDialog avatar={avatar} onClose={() => setExporting(false)} />}
 
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
