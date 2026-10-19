@@ -11,3 +11,4 @@ export * from './debug.ts';
 export * from './group.ts';
 export * from './usage.ts';
 export * from './transfer.ts';
+export * from './auth.ts';

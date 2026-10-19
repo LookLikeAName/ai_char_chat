@@ -1,12 +1,19 @@
 // API key 以 AES-256-GCM 加密後才存進資料庫；金鑰由 APP_SECRET 衍生。
 // 格式：v1:<iv base64>:<tag base64>:<ciphertext base64>
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync } from 'node:crypto';
 
 export class SecretBox {
   private readonly key: Buffer;
+  private readonly signKey: Buffer;
 
   constructor(appSecret: string) {
     this.key = scryptSync(appSecret, 'ai-char-chat/api-keys', 32);
+    this.signKey = scryptSync(appSecret, 'ai-char-chat/sessions', 32);
+  }
+
+  /** 登入的 cookie 用：HMAC-SHA256，base64url */
+  sign(data: string): string {
+    return createHmac('sha256', this.signKey).update(data).digest('base64url');
   }
 
   encrypt(plain: string): string {

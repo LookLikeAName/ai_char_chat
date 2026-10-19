@@ -56,6 +56,14 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** 登入密碼（只有一列）。session_version 加一就能讓所有裝置登出 */
+export const authState = pgTable('auth_state', {
+  id: smallint('id').primaryKey(),
+  passwordHash: text('password_hash'),
+  sessionVersion: integer('session_version').notNull().default(1),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const llmProfiles = pgTable('llm_profiles', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   name: text('name').notNull(),

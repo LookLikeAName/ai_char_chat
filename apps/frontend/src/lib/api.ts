@@ -26,6 +26,7 @@ import type {
   InstrumentId,
   GroupInput,
   UsageSummaryDto,
+  AuthStatusDto,
   ImportRequest,
   ImportResultDto,
 } from '@acc/shared';
@@ -54,6 +55,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && (data as { code?: string }).code === 'unauthorized') window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? `HTTP ${res.status}`);
   return data as T;
 }
@@ -71,7 +73,17 @@ export interface LlmDraft {
   params?: LlmParams;
 }
 
+/** 請求被擋（cookie 失效）時發出，AuthGate 會回到登入頁 */
+export const UNAUTHORIZED_EVENT = 'acc:unauthorized';
+
 export const api = {
+  authStatus: () => request<AuthStatusDto>('GET', '/api/auth/status'),
+  login: (password: string, remember: boolean) => request<{ ok: true }>('POST', '/api/auth/login', { password, remember }),
+  logout: () => request<{ ok: true }>('POST', '/api/auth/logout'),
+  logoutAll: () => request<{ ok: true }>('POST', '/api/auth/logout-all'),
+  setPassword: (current: string | undefined, next: string | null) =>
+    request<{ ok: true }>('PUT', '/api/auth/password', { current, next }),
+
   health: () => request<HealthDto>('GET', '/api/health'),
 
   settings: () => request<AppSettings>('GET', '/api/settings'),
@@ -156,6 +168,7 @@ export const api = {
 };
 
 export const qk = {
+  auth: ['auth'] as const,
   health: ['health'] as const,
   settings: ['settings'] as const,
   profile: ['profile'] as const,

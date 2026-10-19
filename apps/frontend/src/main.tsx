@@ -7,6 +7,7 @@ import '@fontsource/noto-sans-tc/500.css';
 import '@fontsource/noto-sans-tc/700.css';
 import './styles.css';
 import { App } from './App.tsx';
+import { AuthGate } from './pages/auth/AuthGate.tsx';
 import { ServerEventsProvider } from './lib/serverEvents.tsx';
 import { ToastProvider } from './lib/toast.tsx';
 
@@ -19,9 +20,11 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ToastProvider>
-          <ServerEventsProvider>
-            <App />
-          </ServerEventsProvider>
+          <AuthGate>
+            <ServerEventsProvider>
+              <App />
+            </ServerEventsProvider>
+          </AuthGate>
         </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>

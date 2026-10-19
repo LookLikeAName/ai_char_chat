@@ -8,6 +8,8 @@ export interface Config {
   host: string;
   /** 對話停下多久後整理記憶（開發時可以調短測試） */
   memoryIdleMs: number;
+  /** 登入密碼；沒設定時改用網頁上設定的密碼（也可以不設，只在本機使用） */
+  appPassword?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -24,6 +26,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: Number(env.PORT ?? 3000),
     host: env.HOST ?? '0.0.0.0',
     memoryIdleMs: Number(env.MEMORY_IDLE_MS ?? 10 * 60 * 1000),
+    appPassword: env.APP_PASSWORD || undefined,
   };
 }
 

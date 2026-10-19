@@ -5,6 +5,8 @@ x-backend-env: &backend-env
   REDIS_URL: redis://redis:6379
   APP_SECRET: ${APP_SECRET:?請在 .env 設定 APP_SECRET（見 .env.example）}
   MEDIA_DIR: /data/media
+  # 選填：登入密碼。沒填的話可以在「設定 → 安全性」設定
+  APP_PASSWORD: ${APP_PASSWORD:-}
 
 services:
   web:

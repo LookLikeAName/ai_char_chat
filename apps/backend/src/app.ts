@@ -11,6 +11,7 @@ import { HttpError } from './errors.ts';
 import type { EventPublisher } from './events/bus.ts';
 import type { JobQueue } from './jobs.ts';
 import type { FetchFn } from './llm/index.ts';
+import { authRoutes, registerAuthGuard } from './routes/auth.ts';
 import { avatarRoutes } from './routes/avatars.ts';
 import { avatarStateRoutes } from './routes/avatarState.ts';
 import { conversationRoutes } from './routes/conversations.ts';
@@ -21,6 +22,7 @@ import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { transferRoutes } from './routes/transfer.ts';
 import { usageRoutes } from './routes/usage.ts';
+import { AuthService } from './services/auth.ts';
 import { QuotaError } from './services/usage.ts';
 import { WsHub } from './ws.ts';
 
@@ -37,17 +39,23 @@ export interface AppDeps {
   mediaDir: string;
   fetchFn?: FetchFn;
   logger?: boolean;
+  /** 環境變數 APP_PASSWORD；有設定就用它當登入密碼 */
+  appPassword?: string;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     deps: AppDeps;
+    auth: AuthService;
   }
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
+  // api 只透過 nginx 對外，信任一層代理，才拿得到瀏覽器的 IP（登入失敗次數限制用）
+  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024, trustProxy: (_addr, hop) => hop === 0 });
   app.decorate('deps', deps);
+  app.decorate('auth', new AuthService(deps.db, deps.box, deps.appPassword));
+  registerAuthGuard(app);
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof HttpError) {
@@ -69,6 +77,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(
     async (api) => {
+      await api.register(authRoutes);
       await api.register(healthRoutes);
       await api.register(settingsRoutes);
       await api.register(llmProfileRoutes);

@@ -73,6 +73,7 @@ const app = await buildApp({
   hub,
   mediaDir: config.mediaDir,
   logger: true,
+  appPassword: config.appPassword,
 });
 await app.listen({ port: config.port, host: config.host });
 const pingTimer = setInterval(() => hub.ping(), 25_000);
