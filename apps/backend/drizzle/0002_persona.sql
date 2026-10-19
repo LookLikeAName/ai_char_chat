@@ -1,0 +1,1 @@
+ALTER TABLE "avatars" ADD COLUMN "persona_locks" jsonb DEFAULT '[]'::jsonb NOT NULL;

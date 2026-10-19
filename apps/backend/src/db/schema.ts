@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import type { LlmBinding, LlmParams, ProviderType } from '@acc/shared';
+import type { LlmBinding, LlmParams, PersonaDraft, ProviderType } from '@acc/shared';
 
 export interface MessageMeta {
   /** avatar 這一輪回覆的內心想法（只存在第一則） */
@@ -38,8 +38,10 @@ export const avatars = pgTable('avatars', {
   name: text('name').notNull(),
   bio: text('bio').notNull().default(''),
   imagePath: text('image_path'),
-  /** 完整人格設定（第 3 階段） */
-  persona: jsonb('persona').notNull().default({}),
+  /** 完整人格設定（PersonaDraft）：全空或全部填滿 */
+  persona: jsonb('persona').$type<PersonaDraft>().notNull().default({}),
+  /** 玩家鎖定的人格欄位 */
+  personaLocks: jsonb('persona_locks').$type<string[]>().notNull().default([]),
   llm: jsonb('llm').$type<LlmBinding | null>(),
   ...timestamps,
 });

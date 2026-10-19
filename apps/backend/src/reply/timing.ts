@@ -17,10 +17,12 @@ export function readPauseMs(random: Random): number {
   return 600 + Math.round(random() * 1200);
 }
 
-/** 打一則訊息的時間：每字約 110ms，介於 0.8～7 秒 */
-export function typingMs(text: string, random: Random): number {
+const TYPING_SPEED = { slow: 1.6, normal: 1, fast: 0.6 } as const;
+
+/** 打一則訊息的時間：每字約 110ms（依角色的打字速度調整），介於 0.8～7 秒 */
+export function typingMs(text: string, random: Random, speed: keyof typeof TYPING_SPEED = 'normal'): number {
   const chars = [...text].length;
-  return Math.min(7000, Math.max(800, jitter(chars * 110, random)));
+  return Math.min(7000, Math.max(800, jitter(chars * 110 * TYPING_SPEED[speed], random)));
 }
 
 /** 兩則訊息之間的間隔 */

@@ -128,7 +128,7 @@ export class ReplyEngine {
 
     for (const [i, text] of output.messages.entries()) {
       if (i > 0) await setTyping(avatarId, true);
-      await this.sleep(typingMs(text, this.random));
+      await this.sleep(typingMs(text, this.random, ctx.avatar.persona.speech?.typingSpeed));
       if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) {
         await setTyping(avatarId, false);
         return i === 0 ? 'restart' : 'interrupted';
@@ -150,7 +150,7 @@ export class ReplyEngine {
     const settings: AppSettings = await loadSettings(this.deps.db);
     const history = await this.loadHistory(ctx.conversationId);
     const { system, messages: chat } = buildReplyPrompt({
-      avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona as Record<string, unknown> },
+      avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       settings,
       history,
       now: this.now(),

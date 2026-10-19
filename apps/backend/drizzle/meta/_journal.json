@@ -15,6 +15,13 @@
       "when": 1792395991248,
       "tag": "0001_replies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792396696123,
+      "tag": "0002_persona",
+      "breakpoints": true
     }
   ]
 }

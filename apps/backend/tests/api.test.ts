@@ -13,6 +13,7 @@ import { llmProfiles, messages } from '../src/db/schema.ts';
 import type { AgentJob } from '../src/jobs.ts';
 import type { FetchFn } from '../src/llm/index.ts';
 import { WsHub } from '../src/ws.ts';
+import { SAMPLE_PERSONA } from './fixtures/persona.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -26,6 +27,10 @@ describe.skipIf(!url)('API', () => {
 
   const fetchFn = (async (u: string, init: RequestInit) => {
     llmCalls.push({ url: u, headers: init.headers as Record<string, string>, body: init.body ? JSON.parse(init.body as string) : undefined });
+    if (u.includes(':generateContent')) {
+      const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] }));
+    }
     return new Response(
       JSON.stringify({ choices: [{ message: { content: '我是測試模型' }, finish_reason: 'stop' }], usage: {} }),
     );
@@ -257,6 +262,78 @@ describe.skipIf(!url)('API', () => {
         headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
       });
       expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('人格設定', () => {
+    it('不完整的人格設定不能儲存，全空或全部填滿才行', async () => {
+      const avatar = (await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '小雨' } })).json();
+      expect(avatar).toMatchObject({ persona: {}, personaLocks: [], personaComplete: false });
+
+      const partial = await app.inject({
+        method: 'PUT',
+        url: `/api/avatars/${avatar.id}`,
+        payload: { name: '小雨', persona: { basic: { age: 27 } } },
+      });
+      expect(partial.statusCode).toBe(400);
+      expect(partial.json().error).toMatch(/還有 \d+ 個欄位沒填/);
+
+      const minor = await app.inject({
+        method: 'PUT',
+        url: `/api/avatars/${avatar.id}`,
+        payload: { name: '小雨', persona: { ...SAMPLE_PERSONA, basic: { ...SAMPLE_PERSONA.basic, age: 16 } } },
+      });
+      expect(minor.statusCode).toBe(400);
+      expect(minor.json().error).toContain('年齡');
+
+      const full = await app.inject({
+        method: 'PUT',
+        url: `/api/avatars/${avatar.id}`,
+        payload: { name: '小雨', persona: SAMPLE_PERSONA, personaLocks: ['basic.age', 'bogus.path'] },
+      });
+      expect(full.statusCode).toBe(200);
+      expect(full.json()).toMatchObject({ personaComplete: true, personaLocks: ['basic.age'] });
+
+      // 不帶 persona 時不變更
+      const rename = await app.inject({ method: 'PUT', url: `/api/avatars/${avatar.id}`, payload: { name: '林小雨' } });
+      expect(rename.json()).toMatchObject({ name: '林小雨', personaComplete: true });
+    });
+
+    it('沒有設定系統工具模型時，AI 補完回 400', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/avatars/persona/generate', payload: { name: '小雨' } });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('系統工具模型');
+    });
+
+    it('用 Gemini 生成頭像', async () => {
+      const profile = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/llm-profiles',
+          payload: { name: 'g', provider: 'google', model: 'gemini-x', apiKey: 'gk-1234' },
+        })
+      ).json();
+      const avatar = (await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '小雨' } })).json();
+      const noSetting = await app.inject({
+        method: 'POST',
+        url: `/api/avatars/${avatar.id}/image/generate`,
+        payload: { prompt: '短髮女生' },
+      });
+      expect(noSetting.statusCode).toBe(400);
+
+      await app.inject({
+        method: 'PATCH',
+        url: '/api/settings',
+        payload: { imageGen: { profileId: profile.id, model: 'gemini-image-x' } },
+      });
+      const res = await app.inject({ method: 'POST', url: `/api/avatars/${avatar.id}/image/generate`, payload: { prompt: '短髮女生' } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().imageUrl).toMatch(/\.png$/);
+      const call = llmCalls.at(-1)!;
+      expect(call.url).toContain('models/gemini-image-x:generateContent');
+      expect(call.headers['x-goog-api-key']).toBe('gk-1234');
+      expect(call.body.generationConfig.responseModalities).toEqual(['IMAGE']);
+      expect((await app.inject({ url: res.json().imageUrl })).statusCode).toBe(200);
     });
   });
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AppSettings } from '@acc/shared';
+import { PROVIDER_LABELS, type AppSettings } from '@acc/shared';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -14,6 +14,8 @@ export function GeneralSettings() {
 
 function GeneralForm({ initial }: { initial: AppSettings }) {
   const [s, setS] = useState(initial);
+  const { data: profiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const imageProfiles = profiles.filter((p) => p.provider !== 'anthropic');
   const toast = useToast();
   const qc = useQueryClient();
   const timezones = useMemo(() => Intl.supportedValuesOf('timeZone'), []);
@@ -122,6 +124,44 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
+        <h2>頭像生成</h2>
+        <p className="hint">用哪個 LLM 設定檔的 API key 與端點，以及哪個圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。</p>
+        <label className="field">
+          <span className="field-label">設定檔</span>
+          <select
+            value={s.imageGen?.profileId ?? ''}
+            onChange={(e) =>
+              patch({ imageGen: e.target.value ? { profileId: e.target.value, model: s.imageGen?.model ?? '' } : null })
+            }
+          >
+            <option value="">（不使用）</option>
+            {imageProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}（{PROVIDER_LABELS[p.provider]}）
+              </option>
+            ))}
+          </select>
+        </label>
+        {s.imageGen && (
+          <label className="field">
+            <span className="field-label">圖片模型</span>
+            <input
+              value={s.imageGen.model}
+              list="image-models"
+              placeholder="例如 gemini-2.5-flash-image、imagen-4.0-generate-001、gpt-image-1"
+              onChange={(e) => patch({ imageGen: { ...s.imageGen!, model: e.target.value } })}
+            />
+            <datalist id="image-models">
+              <option value="gemini-2.5-flash-image" />
+              <option value="imagen-4.0-generate-001" />
+              <option value="gpt-image-1" />
+            </datalist>
+            <span className="hint">模型名稱以 imagen 開頭的走 Imagen API，其他 Google 模型走 Gemini 的圖片輸出。</span>
+          </label>
+        )}
+      </section>
+
+      <section className="card">
         <h2>用量</h2>
         <label className="field">
           <span className="field-label">每日 token 上限（0 表示不限）</span>
@@ -139,7 +179,11 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       <footer className="editor-foot">
         <span className="spacer" />
         {dirty && <span className="hint">有尚未儲存的變更</span>}
-        <button type="submit" className="btn btn-primary" disabled={!dirty || save.isPending}>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={!dirty || save.isPending || (!!s.imageGen && !s.imageGen.model.trim())}
+        >
           {save.isPending ? '儲存中…' : '儲存'}
         </button>
       </footer>

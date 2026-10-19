@@ -16,6 +16,11 @@ export const appSettingsSchema = z.object({
   showInnerThoughts: z.boolean().default(false),
   /** 系統工具模型：補完設定、萃取記憶、生活日誌… */
   utilityLlm: llmBindingSchema.nullable().default(null),
+  /** 頭像生成：用哪個 LLM 設定檔的 key 與端點、哪個圖片模型 */
+  imageGen: z
+    .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
+    .nullable()
+    .default(null),
   /** 全域每日 token 上限；0 表示不限 */
   dailyTokenLimit: z.number().int().min(0).default(0),
 });

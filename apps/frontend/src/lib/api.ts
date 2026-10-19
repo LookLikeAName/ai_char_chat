@@ -8,6 +8,9 @@ import type {
   LlmProfileDto,
   LlmProfileInput,
   MessageDto,
+  PersonaGenerateInput,
+  PersonaGenerateResult,
+  PersonaIssue,
   ProviderType,
 } from '@acc/shared';
 
@@ -71,6 +74,12 @@ export const api = {
     return request<AvatarDto>('POST', `/api/avatars/${id}/image`, form);
   },
   deleteAvatarImage: (id: string) => request<AvatarDto>('DELETE', `/api/avatars/${id}/image`),
+  generateAvatarImage: (id: string, prompt: string) =>
+    request<AvatarDto>('POST', `/api/avatars/${id}/image/generate`, { prompt }),
+  generatePersona: (input: PersonaGenerateInput) =>
+    request<PersonaGenerateResult>('POST', '/api/avatars/persona/generate', input),
+  checkPersona: (input: { name: string; bio: string; persona: unknown; locks: string[] }) =>
+    request<{ issues: PersonaIssue[] }>('POST', '/api/avatars/persona/check', input),
 
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>

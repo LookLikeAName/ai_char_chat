@@ -1,11 +1,12 @@
 // 組出一對一回覆的 prompt。順序：角色設定（固定，利於快取）→ 規則 → 現在的情境 → 對話紀錄。
-import type { AppSettings } from '@acc/shared';
+import { currentBlock, ENUM_OPTIONS, personaSchema, type AppSettings, type Persona, type PersonaDraft } from '@acc/shared';
 import type { ChatMessage } from '../llm/index.ts';
+import { renderPersona } from '../persona/describe.ts';
 
 export interface PromptAvatar {
   name: string;
   bio: string;
-  persona: Record<string, unknown>;
+  persona: PersonaDraft;
 }
 
 export interface HistoryMessage {
@@ -49,16 +50,28 @@ export function formatGap(ms: number): string {
   return `${Math.round(hours / 24)} 天`;
 }
 
-function personaSection(persona: Record<string, unknown>): string {
-  // 第 3 階段的 avatar creator 會定義完整欄位；在那之前有什麼就照實列出
-  const entries = Object.entries(persona).filter(([, v]) => v !== null && v !== undefined && v !== '');
-  if (!entries.length) return '';
-  return entries.map(([k, v]) => `- ${k}：${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n');
+/** 某時區的「現在」：是否週末、HH:MM */
+export function localClock(now: Date, timezone: string): { weekend: boolean; hhmm: string } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return { weekend: ['Sat', 'Sun'].includes(get('weekday')), hhmm: `${get('hour')}:${get('minute')}` };
+}
+
+/** 完整的人格設定；還沒建立（或不完整）時回傳 null，只用簡介 */
+export function completePersona(draft: PersonaDraft): Persona | null {
+  const r = personaSchema.safeParse(draft);
+  return r.success ? r.data : null;
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
   const { avatar, settings, now, history } = input;
-  const persona = personaSection(avatar.persona);
+  const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
   let i = history.length - 1;
   while (i >= 0 && history[i]!.senderType === 'user') i--;
@@ -69,24 +82,30 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
     ? '允許成人內容。你和對方都是成年人；是否發展到親密或露骨的內容，取決於你的個性、你們的關係和當下的氣氛，你可以拒絕。'
     : '不寫露骨的性內容。對方往這個方向帶時，用符合你個性的方式婉拒、害羞帶過或轉移話題。';
 
+  const clock = localClock(now, settings.timezone);
+  const block = persona ? currentBlock(persona.routine.schedule, clock.weekend, clock.hhmm) : null;
+  const relationship = persona
+    ? `${persona.relationship.withUser}\n你稱呼對方「${persona.relationship.callsUser}」。`
+    : '你們的關係還沒有特別設定：就當作透過朋友認識不久、正在慢慢熟悉的人。';
+
   return `你是「${avatar.name}」，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。
 
 # 你的設定
 ${avatar.bio || '（沒有額外描述）'}
-${persona ? `\n${persona}\n` : ''}
+${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
-你們的關係還沒有特別設定：就當作透過朋友認識不久、正在慢慢熟悉的人。
+${relationship}
 
 # 規則
-- 完全以「${avatar.name}」的身分說話，言行符合你的設定；絕對不要說自己是 AI、模型、程式或角色扮演。
-- 像真人傳訊息：口語、自然、通常很短。一次可以傳 1～4 則，一則一個想法；不要用 Markdown、條列或標題。
-- 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。
+- 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
+- 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
+- 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
 - 不要捏造對方沒說過的事；不知道就問。
 - 除非你的設定另有指定，用繁體中文（台灣用語）。
 - ${content}
 
 # 現在
-現在時間：${formatNow(now, settings.timezone)}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}
+現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：

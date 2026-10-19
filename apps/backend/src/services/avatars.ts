@@ -1,4 +1,4 @@
-import type { AvatarDto } from '@acc/shared';
+import { isPersonaEmpty, missingFields, type AvatarDto } from '@acc/shared';
 import type { avatars } from '../db/schema.ts';
 
 export function mediaUrl(p: string | null): string | null {
@@ -12,6 +12,9 @@ export function avatarToDto(row: typeof avatars.$inferSelect, dmConversationId: 
     bio: row.bio,
     imageUrl: mediaUrl(row.imagePath),
     llm: row.llm ?? null,
+    persona: row.persona,
+    personaLocks: row.personaLocks,
+    personaComplete: !isPersonaEmpty(row.persona) && missingFields(row.persona).length === 0,
     dmConversationId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
