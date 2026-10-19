@@ -2933,3 +2933,69 @@ fieldset.field {
   align-items: center;
   gap: 10px;
 }
+
+/* ---------- 手機：下方的分頁列、標題不被擠成直排、表格橫向捲動 ---------- */
+
+.editor-head {
+  flex-wrap: wrap;
+}
+
+.editor-head > select {
+  flex: none;
+  width: auto;
+}
+
+.editor-head h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .rail {
+    position: relative;
+    grid-row: 2;
+    flex-direction: row;
+    justify-content: space-around;
+    gap: 0;
+    padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+  }
+
+  .rail-logo,
+  .rail-spacer {
+    display: none;
+  }
+
+  .rail-btn {
+    width: 48px;
+    height: 44px;
+  }
+
+  .rail .ws-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+  }
+
+  /* 進到聊天或編輯畫面時收起分頁列（有返回鍵），輸入框才會在最下面 */
+  .app:has(.chats.has-selection) > .rail,
+  .app:has(.two-pane.has-selection:not(.settings)) > .rail {
+    display: none;
+  }
+
+  .data-table th,
+  .data-table td {
+    white-space: nowrap;
+  }
+
+  .editor-head {
+    row-gap: 6px;
+  }
+}

@@ -71,7 +71,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const [profileId, setProfileId] = useState<string>('');
   const [memories, setMemories] = useState(true);
   const [history, setHistory] = useState(true);
-  const selectedProfile = profileId || profiles[0]?.id || '';
+  // 預設用最多 avatar 綁定的設定檔
+  const selectedProfile = profileId || [...profiles].sort((a, b) => b.usedBy - a.usedBy)[0]?.id || '';
 
   const hasMemories = !!file?.avatars.some((a) => a.memories?.length || a.relationship);
   const hasHistory = !!file?.avatars.some((a) => a.messages?.length);
