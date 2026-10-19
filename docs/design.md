@@ -8,7 +8,7 @@
 | --- | --- |
 | 形式 | WebApp，所有元件包在 docker compose |
 | 使用者 | 單人使用，不做帳號系統（可選一組存取密碼） |
-| 後端 | Node + TypeScript（Fastify），沿用 `ai_avatar` 的 LLM 呼叫層與記憶設計 |
+| 後端 | Node + TypeScript（Fastify） |
 | 前端 | React + Vite + TypeScript |
 | 資料庫 | PostgreSQL + pgvector；排程用 Redis + BullMQ |
 | 頭像 | 玩家上傳圖片；另有圖片生成 API（介面可替換，預設 Google） |
@@ -16,6 +16,7 @@
 | 內容分級 | 允許成人內容（全域開關，預設關閉）；所有 avatar 一律 18 歲以上 |
 | 一對一延遲 | 依作息可以拖很久；玩家連續傳訊息會讓 avatar「注意到」而提早回覆 |
 | 記憶私密性 | 私訊的內容 avatar 記得，但不會在群組講出來（除非性格本來就口風不緊） |
+| LLM 設定 | 在設定頁統一管理「LLM 設定檔」（供應商、模型、API key、參數預設值）；avatar 綁定一個設定檔，只覆寫自己要調整的參數 |
 
 ---
 
@@ -133,7 +134,7 @@ ORM 與 migration 用 Drizzle。avatar 設定、LLM 輸出格式都用 zod 定�
 | 感情觀 | 對戀愛的態度、喜歡的類型、升溫速度、表達愛意的方式、吃醋程度、底線、過往感情經歷 |
 | 日常作息 | 每週作息表（睡覺、工作、通勤、空閒時段）、回訊息習慣（秒回型／隔很久型）、手機使用習慣 |
 | 人際關係 | 和玩家的初始關係與認識經過、和其他 avatar 的關係（可選） |
-| 系統 | 頭像、使用的 LLM 設定、溫度、每日用量上限 |
+| 系統 | 頭像、LLM 綁定（設定檔 + 覆寫參數）、每日用量上限 |
 
 ### 4.2 LLM 補完流程
 
@@ -236,13 +237,28 @@ prompt 依序組成：
 
 ## 6. 各自的大腦與記憶
 
-### 6.1 LLM 設定
+### 6.1 LLM 設定（兩層：設定檔 + 綁定）
 
-- 「供應商」在設定頁建立一次（類型、baseUrl、API key），avatar 只選供應商 + 模型 + 溫度。
+```
+設定頁：LLM 設定檔（可以有很多個）            avatar 設定頁：綁定
+┌──────────────────────────────┐          ┌───────────────────────────┐
+│ 名稱：Gemini Flash             │◄─────────│ 設定檔：Gemini Flash         │
+│ 供應商、Base URL、API key（加密）│          │ 覆寫：temperature = 1.15     │
+│ 模型：gemini-2.5-flash          │          │ （其他參數沿用設定檔）         │
+│ 參數預設值：temperature 0.8 …   │          └───────────────────────────┘
+└──────────────────────────────┘
+實際參數 = 設定檔預設值 + 綁定的覆寫值（resolveParams）
+```
+
+- **設定檔**：供應商類型、Base URL、API key、模型、參數預設值。API key 以 `APP_SECRET` 加密存放，API 只回傳「是否已設定」與最後 4 碼。
+- **綁定**：avatar 與系統工具模型各自選一個設定檔，再勾選要覆寫的參數。沒勾選的參數沿用設定檔；設定檔也沒填的，就用供應商預設值。
+- 可覆寫的參數：temperature、top P、最大輸出 tokens、presence／frequency penalty；供應商不支援的參數會在呼叫時略過（例如 Anthropic 沒有 penalty）。
+- 改設定檔（例如換模型、換 key）會立刻套用到所有綁定它的 avatar；被綁定中的設定檔不能刪除。
+- 設定頁可以「取得模型清單」與「測試連線」；avatar 頁可以用自己的覆寫參數測試。
 - 類型：Google Gemini、Anthropic、OpenAI、OpenAI 相容端點（OpenRouter、DeepSeek、Ollama、LM Studio、vLLM…）。
-- 實作沿用 `ai_avatar` 的 `pi-ai` 呼叫層，不支援的類型再補 adapter。
-- **工具模型**：系統另設一個模型，負責補完設定、萃取記憶、反思、生活日誌、測驗摘要；建議選便宜快速的模型。
-- 成人內容：雲端供應商有各自的使用政策，可能拒絕；設定頁會提示，可以替個別 avatar 換成限制較少的模型（例如本機模型）。
+- 實作：自己寫的輕量 adapter（直接呼叫各家 HTTP API），不沿用 `ai_avatar` 的 `pi-ai`：這裡需要的是「每次呼叫帶不同參數 + JSON 輸出」，直接控制請求內容比較單純，也容易用假的 fetch 測試。
+- **系統工具模型**：系統另綁一個設定檔，負責補完設定、萃取記憶、反思、生活日誌、測驗摘要；建議選便宜快速的模型。
+- 成人內容：雲端供應商有各自的使用政策，可能拒絕；開啟成人內容時會放寬 Gemini 的安全過濾，仍被拒絕時可以替個別 avatar 換成限制較少的模型（例如本機模型）。
 
 ### 6.2 記憶結構（參考 Generative Agents，Park et al., 2023）
 
@@ -266,10 +282,10 @@ prompt 依序組成：
 | 表 | 用途 |
 | --- | --- |
 | `settings` | 全域設定（時區、勿擾時段、成人內容、工具模型、嵌入、圖片生成、用量上限） |
-| `llm_providers` | 供應商與加密的 API key |
+| `llm_profiles` | LLM 設定檔（供應商、模型、加密的 API key、參數預設值） |
 | `user_profile` | 玩家基本資料、偏好問卷、profile 摘要 |
 | `assessment_responses` / `assessment_results` | 測驗作答（可分段）與分數 |
-| `avatars` | 靜態設定（JSONB，依 zod schema）、頭像、LLM 設定 |
+| `avatars` | 靜態設定（JSONB，依 zod schema）、頭像、LLM 綁定（設定檔 id + 覆寫參數） |
 | `avatar_state` | 心情、目前活動、今日主動發話次數 |
 | `relationships` | avatar → 玩家／其他 avatar 的好感、信任、階段、事件紀錄 |
 | `life_logs` | 每日生活日誌 |
@@ -293,7 +309,7 @@ prompt 依序組成：
 
 | 階段 | 內容 | 完成時可以做到 |
 | --- | --- | --- |
-| 1. 骨架 | monorepo、docker compose、資料庫 migration、設定頁（供應商、API key）、四欄 UI 外殼、WebSocket | `docker compose up` 後打得開介面、設定得了模型 |
+| 1. 骨架 ✅ | monorepo、docker compose、資料庫 migration、設定頁（LLM 設定檔、一般設定、系統狀態）、avatar 基本資料與 LLM 綁定、頭像上傳、四欄 UI 外殼、WebSocket | `docker compose up` 後打得開介面、設定得了模型 |
 | 2. 一對一聊天 | 手動建立簡易 avatar、每個 avatar 的 LLM 設定、5.1 的回覆流程、輸入中與多則訊息 | 能和 avatar 聊天 |
 | 3. Avatar creator | 完整 schema、LLM 補完與一致性檢查、預覽編輯、頭像上傳與生成 | 能建立完整角色 |
 | 4. 心理測驗 | 量表題庫、分段作答、計分、摘要、首次使用流程 | 玩家 profile 進入 prompt |

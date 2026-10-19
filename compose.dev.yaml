@@ -1,0 +1,9 @@
+# 本機開發：只啟動資料庫與 Redis，並開放到 localhost，api／worker／前端用 npm run dev:* 跑
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d postgres redis
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

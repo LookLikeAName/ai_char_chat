@@ -1,0 +1,20 @@
+{
+  "name": "ai-char-chat",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev:api": "npm -w @acc/backend run dev:api",
+    "dev:worker": "npm -w @acc/backend run dev:worker",
+    "dev:web": "npm -w @acc/frontend run dev",
+    "build": "npm -w @acc/backend run build && npm -w @acc/frontend run build",
+    "typecheck": "npm -ws --if-present run typecheck",
+    "test": "npm -ws --if-present run test"
+  }
+}

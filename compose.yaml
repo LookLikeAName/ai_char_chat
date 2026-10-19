@@ -1,0 +1,87 @@
+name: ai-char-chat
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgres://acc:${POSTGRES_PASSWORD:-acc}@postgres:5432/acc
+  REDIS_URL: redis://redis:6379
+  APP_SECRET: ${APP_SECRET:?請在 .env 設定 APP_SECRET（見 .env.example）}
+  MEDIA_DIR: /data/media
+
+services:
+  web:
+    build: { context: ., dockerfile: docker/Dockerfile, target: web }
+    # 預設只開放本機連線；要讓區網其他裝置連線，把 .env 的 WEB_BIND 改成 0.0.0.0
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile, target: backend }
+    environment: *backend-env
+    volumes:
+      - media:/data/media
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile, target: backend }
+    command: ["node", "--enable-source-maps", "dist/worker.mjs"]
+    environment: *backend-env
+    volumes:
+      - media:/data/media
+    depends_on:
+      # api 啟動時負責跑 migration，所以 worker 等 api 健康後才啟動
+      api: { condition: service_healthy }
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: acc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acc}
+      POSTGRES_DB: acc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acc -d acc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # 排程中的回覆與主動發話都在 Redis 裡，開啟 AOF 才不會在重啟時遺失
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # 選用：本機模型。啟動方式：docker compose --profile local up -d
+  # LLM 設定檔選「OpenAI 相容端點」，Base URL 填 http://ollama:11434/v1
+  ollama:
+    image: ollama/ollama
+    profiles: ["local"]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  ollama:

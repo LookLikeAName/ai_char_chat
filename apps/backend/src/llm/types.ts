@@ -1,0 +1,49 @@
+import type { LlmParams, ProviderType } from '@acc/shared';
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatRequest {
+  system?: string;
+  messages: ChatMessage[];
+  params: LlmParams;
+  /** 要求輸出 JSON；不支援的供應商只靠 prompt */
+  json?: boolean;
+  /** 放寬供應商的安全過濾（成人內容開啟時），目前只有 Gemini 支援 */
+  relaxedSafety?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface ChatResult {
+  text: string;
+  usage: { inputTokens: number; outputTokens: number };
+  finishReason: string | null;
+}
+
+/** 已解出 API key、可以直接呼叫的設定 */
+export interface ResolvedLlm {
+  provider: ProviderType;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+export type FetchFn = typeof fetch;
+
+export interface ProviderAdapter {
+  complete(llm: ResolvedLlm, req: ChatRequest, fetchFn: FetchFn): Promise<ChatResult>;
+  listModels(llm: ResolvedLlm, fetchFn: FetchFn): Promise<string[]>;
+}
+
+export class LlmError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'LlmError';
+  }
+}
