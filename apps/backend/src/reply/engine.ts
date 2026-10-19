@@ -16,7 +16,10 @@ import { avatars, conversationMembers, conversations, messages } from '../db/sch
 import type { EventPublisher } from '../events/bus.ts';
 import type { FetchFn } from '../llm/index.ts';
 import type { Lock } from '../lock.ts';
+import { embedderFromSettings } from '../memory/embedder.ts';
+import { latestImpression, retrieveMemories } from '../memory/store.ts';
 import { loadProfile } from '../profile/service.ts';
+import { applyInteraction, getMood, getRelationship, setMood } from '../relationship/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
 import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -29,13 +32,15 @@ export interface ReplyEngineDeps {
   box: SecretBox;
   events: EventPublisher;
   lock: Lock;
+  /** 回覆完成後呼叫（排程記憶萃取） */
+  onReplied?: (avatarId: string, conversationId: string) => Promise<void>;
   fetchFn?: FetchFn;
   sleep?: (ms: number) => Promise<void>;
   random?: Random;
   now?: () => Date;
 }
 
-type Outcome = 'sent' | 'interrupted' | 'restart';
+type Outcome = { kind: 'restart' } | { kind: 'sent' | 'interrupted'; output: ReplyOutput };
 
 interface Ctx {
   conversationId: string;
@@ -89,8 +94,10 @@ export class ReplyEngine {
 
         await this.markSeen(ctx, snapshot);
         const outcome = await this.generateAndSend(ctx, snapshot, setTyping);
-        if (outcome === 'restart') continue;
+        if (outcome.kind === 'restart') continue;
         await this.markHandled(ctx, snapshot);
+        await this.applyState(ctx, outcome.output);
+        await this.deps.onReplied?.(ctx.avatar.id, ctx.conversationId);
       }
       return 'done';
     } finally {
@@ -118,13 +125,13 @@ export class ReplyEngine {
   ): Promise<Outcome> {
     const avatarId = ctx.avatar.id;
     await this.sleep(readPauseMs(this.random));
-    if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) return 'restart';
+    if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) return { kind: 'restart' };
 
     await setTyping(avatarId, true);
     const output = await this.generate(ctx);
     if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) {
       await setTyping(avatarId, false);
-      return 'restart';
+      return { kind: 'restart' };
     }
 
     for (const [i, text] of output.messages.entries()) {
@@ -132,7 +139,7 @@ export class ReplyEngine {
       await this.sleep(typingMs(text, this.random, ctx.avatar.persona.speech?.typingSpeed));
       if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) {
         await setTyping(avatarId, false);
-        return i === 0 ? 'restart' : 'interrupted';
+        return i === 0 ? { kind: 'restart' } : { kind: 'interrupted', output };
       }
       await postMessage(this.deps.db, this.deps.events, {
         conversationId: ctx.conversationId,
@@ -144,21 +151,56 @@ export class ReplyEngine {
       await setTyping(avatarId, false);
       if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
     }
-    return 'sent';
+    return { kind: 'sent', output };
+  }
+
+  /** 回覆送出後更新心情與關係 */
+  private async applyState(ctx: Ctx, output: ReplyOutput): Promise<void> {
+    const db = this.deps.db;
+    if (output.mood) await setMood(db, ctx.avatar.id, output.mood);
+    const warmUp = ctx.avatar.persona.romance?.warmUpSpeed ?? 'medium';
+    const { before, after } = await applyInteraction(
+      db,
+      ctx.avatar.id,
+      { affinity: output.affinityDelta, trust: output.trustDelta, event: output.event?.type, note: output.event?.note },
+      warmUp,
+    );
+    const changed = output.mood || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
+    if (changed) await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
   }
 
   private async generate(ctx: Ctx): Promise<ReplyOutput> {
     const settings: AppSettings = await loadSettings(this.deps.db);
+    const db = this.deps.db;
     const history = await this.loadHistory(ctx.conversationId);
-    const profile = await loadProfile(this.deps.db);
+    const profile = await loadProfile(db);
+    const now = this.now();
+    const embedder = await embedderFromSettings(db, this.deps.box, settings, this.deps.fetchFn).catch(() => null);
+    const [relationship, mood, impression] = await Promise.all([
+      getRelationship(db, ctx.avatar.id),
+      getMood(db, ctx.avatar.id, now),
+      latestImpression(db, ctx.avatar.id),
+    ]);
+    // 用最近幾則訊息當查詢，找出相關的記憶
+    const query = history
+      .slice(-4)
+      .map((m) => m.content)
+      .join('\n');
+    const memories = await retrieveMemories(db, embedder, { avatarId: ctx.avatar.id, query, now });
     const { system, messages: chat } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       user: profile.preferences
         ? { preferences: profile.preferences, summary: profile.summary, results: profile.results }
         : null,
+      state: {
+        relationship: { stage: relationship.stage, affinity: relationship.affinity, trust: relationship.trust },
+        mood,
+        memories,
+        impression: impression?.content ?? null,
+      },
       settings,
       history,
-      now: this.now(),
+      now,
     });
     const call = (extra: typeof chat = []) =>
       callWithBinding(

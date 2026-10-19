@@ -1,9 +1,15 @@
 // 解析 avatar 回覆的 JSON。模型偶爾會包 ```json、前後多講話，盡量救回來。
 import { z } from 'zod';
+import { moodSchema, RELATIONSHIP_EVENTS, type Mood, type RelationshipEventType } from '@acc/shared';
 
 export interface ReplyOutput {
   innerThought: string;
   messages: string[];
+  /** 回覆後的心情；模型沒給就不變 */
+  mood?: Mood;
+  affinityDelta: number;
+  trustDelta: number;
+  event: { type: RelationshipEventType; note: string } | null;
 }
 
 const MAX_MESSAGES = 6;
@@ -13,7 +19,25 @@ const outputSchema = z.object({
   inner_thought: z.string().optional(),
   messages: z.union([z.array(z.string()), z.string()]).optional(),
   message: z.string().optional(),
+  // 狀態欄位格式不對時當作沒給，不影響訊息本身
+  mood: z.unknown().optional(),
+  affinity_delta: z.unknown().optional(),
+  trust_delta: z.unknown().optional(),
+  relationship_event: z.unknown().optional(),
 });
+
+function delta(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+function parseEvent(v: unknown): ReplyOutput['event'] {
+  if (!v) return null;
+  const type = typeof v === 'string' ? v : (v as { type?: unknown }).type;
+  if (typeof type !== 'string' || !(RELATIONSHIP_EVENTS as readonly string[]).includes(type)) return null;
+  const note = typeof v === 'object' && typeof (v as { note?: unknown }).note === 'string' ? (v as { note: string }).note : '';
+  return { type: type as RelationshipEventType, note: note.slice(0, 200) };
+}
 
 function extractJson(text: string): unknown {
   const stripped = text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
@@ -42,7 +66,15 @@ export function parseReplyOutput(text: string): ReplyOutput | null {
   const raw = parsed.data.messages ?? parsed.data.message;
   const messages = clean(typeof raw === 'string' ? [raw] : (raw ?? []));
   if (!messages.length) return null;
-  return { innerThought: parsed.data.inner_thought?.trim() ?? '', messages };
+  const mood = moodSchema.safeParse(parsed.data.mood);
+  return {
+    innerThought: parsed.data.inner_thought?.trim() ?? '',
+    messages,
+    mood: mood.success ? mood.data : undefined,
+    affinityDelta: delta(parsed.data.affinity_delta),
+    trustDelta: delta(parsed.data.trust_delta),
+    event: parseEvent(parsed.data.relationship_event),
+  };
 }
 
 /**
@@ -53,5 +85,5 @@ export function plainTextFallback(text: string): ReplyOutput | null {
   const t = text.trim();
   if (!t || /[{}[\]]/.test(t.slice(0, 2)) || /"messages"\s*:/.test(t)) return null;
   const messages = clean(t.split(/\n\s*\n/));
-  return messages.length ? { innerThought: '', messages } : null;
+  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null } : null;
 }

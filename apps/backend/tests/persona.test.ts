@@ -87,6 +87,8 @@ describe('回覆 prompt 使用完整人格', () => {
         summary: '這位玩家慢熱但很真誠。',
         results: { bigFive: null, attachment: null, values: null },
       },
+      // 成為朋友後才看得到摘要
+      state: { relationship: { stage: 'friend', affinity: 35, trust: 35 }, mood: { label: '平常', valence: 0, energy: 0 }, memories: [], impression: null },
       settings: { timezone: 'Asia/Taipei', adultContent: false },
       history: [],
       now: new Date('2026-10-19T03:00:00Z'),

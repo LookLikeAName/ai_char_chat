@@ -6,6 +6,8 @@ export interface Config {
   mediaDir: string;
   port: number;
   host: string;
+  /** 對話停下多久後整理記憶（開發時可以調短測試） */
+  memoryIdleMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -21,6 +23,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mediaDir: env.MEDIA_DIR ?? './data/media',
     port: Number(env.PORT ?? 3000),
     host: env.HOST ?? '0.0.0.0',
+    memoryIdleMs: Number(env.MEMORY_IDLE_MS ?? 10 * 60 * 1000),
   };
 }
 

@@ -93,6 +93,8 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     if (used) throw new HttpError(409, `還有 ${used} 個 avatar 綁定這個設定檔，請先改綁其他設定檔`);
     const settings = await loadSettings(db);
     if (settings.utilityLlm?.profileId === id) throw new HttpError(409, '系統工具模型正在使用這個設定檔');
+    if (settings.embedding?.profileId === id) throw new HttpError(409, '記憶的嵌入模型正在使用這個設定檔');
+    if (settings.imageGen?.profileId === id) throw new HttpError(409, '頭像生成正在使用這個設定檔');
     await db.delete(llmProfiles).where(eq(llmProfiles.id, id));
     await events.publish({ type: 'llmProfiles.changed' });
     return reply.status(204).send();

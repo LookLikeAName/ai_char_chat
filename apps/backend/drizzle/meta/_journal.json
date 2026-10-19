@@ -29,6 +29,20 @@
       "when": 1792397560134,
       "tag": "0003_user_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792398367956,
+      "tag": "0004_pgvector",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792398369206,
+      "tag": "0005_memory",
+      "breakpoints": true
     }
   ]
 }

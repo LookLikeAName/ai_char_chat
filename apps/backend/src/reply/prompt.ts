@@ -3,11 +3,18 @@ import {
   currentBlock,
   ENUM_OPTIONS,
   personaSchema,
+  romanceGuidance,
+  ROMANCE_PREFS,
+  STAGE_GUIDANCE,
+  STAGE_LABELS,
   type AppSettings,
   type AssessmentResults,
+  type Mood,
   type Persona,
   type PersonaDraft,
   type Preferences,
+  type RelationshipState,
+  type Stage,
 } from '@acc/shared';
 import type { ChatMessage } from '../llm/index.ts';
 import { renderPersona } from '../persona/describe.ts';
@@ -32,9 +39,19 @@ export interface PromptUser {
   results: AssessmentResults;
 }
 
+/** avatar 的動態狀態（第 5 階段） */
+export interface PromptState {
+  relationship: RelationshipState;
+  mood: Mood;
+  /** 依相關度挑出的記憶 */
+  memories: { content: string; createdAt: Date }[];
+  impression: string | null;
+}
+
 export interface ReplyPromptInput {
   avatar: PromptAvatar;
   user?: PromptUser | null;
+  state?: PromptState | null;
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
@@ -88,7 +105,8 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history, user } = input;
+  const { avatar, settings, now, history, user, state } = input;
+  const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
   let i = history.length - 1;
@@ -113,7 +131,7 @@ ${avatar.bio || '（沒有額外描述）'}
 ${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
 ${relationship}
-${user ? `\n${userSection(user)}\n` : ''}
+${state ? `\n${stateSection(state, user, now, settings.timezone)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
@@ -127,21 +145,67 @@ ${user ? `\n${userSection(user)}\n` : ''}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
-{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]}`;
+{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3, "relationship_event": null}` : '}'}${
+    state
+      ? `
+- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
+- relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
+      : ''
+  }`;
 }
 
+const FAMILIAR: Stage[] = ['friend', 'close', 'crush', 'lover'];
+
 /**
- * 關於玩家的參考資料。avatar 應該把這些當成相處下來的直覺，不能說出「測驗」「分析」之類的話。
+ * 關於玩家的參考資料，依關係深淺逐步透露：剛認識只知道稱呼，認識之後知道偏好，成為朋友後才有整體的感覺（摘要）。
+ * avatar 應該把這些當成相處下來的直覺，不能說出「測驗」「分析」之類的話。
  */
-function userSection(user: PromptUser): string {
-  const prefs = describePreferences(user.preferences).filter((l) => !l.startsWith('希望被稱呼為'));
-  const body = user.summary.trim()
-    ? user.summary.trim()
-    : [...prefs, ...describeResults(user.results)].map((l) => `- ${l}`).join('\n');
-  return `對方的名字（希望被這樣稱呼）：${user.preferences.nickname}
+export function userSection(user: PromptUser, stage: Stage): string {
+  const name = `對方的名字（希望被這樣稱呼）：${user.preferences.nickname}`;
+  if (stage === 'stranger') return `${name}\n你對對方還不太了解，想知道什麼就自己問。`;
+  const prefs = describePreferences(user.preferences)
+    .filter((l) => !l.startsWith('希望被稱呼為'))
+    .map((l) => `- ${l}`);
+  if (!FAMILIAR.includes(stage)) {
+    return `${name}
+
+## 你目前知道的對方（相處下來大概知道的；不要提到測驗或問卷，也不要一次全講出來）
+${prefs.join('\n') || '- （還不太了解）'}`;
+  }
+  const body = user.summary.trim() ? user.summary.trim() : describeResults(user.results).map((l) => `- ${l}`).join('\n');
+  return `${name}
 
 ## 關於對方（你相處下來大概感覺得到的；不要提到測驗、分數或分析，也不要一次把知道的都講出來）
-${body}${user.summary.trim() && prefs.length ? `\n${prefs.map((l) => `- ${l}`).join('\n')}` : ''}`;
+${[body, prefs.join('\n')].filter(Boolean).join('\n')}`;
+}
+
+function shortDate(d: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('zh-TW', { timeZone: timezone, month: 'numeric', day: 'numeric' }).format(d);
+}
+
+function stateSection(state: PromptState, user: PromptUser | null | undefined, now: Date, timezone: string): string {
+  const r = state.relationship;
+  const romancePref = user?.preferences.romance;
+  const lines = [
+    `## 你們的關係：${STAGE_LABELS[r.stage]}（好感 ${r.affinity}/100、信任 ${r.trust}/100）`,
+    STAGE_GUIDANCE[r.stage],
+    romanceGuidance(r),
+    romancePref === 'none' ? '對方表示只想當朋友：不要主動往戀愛發展。' : romancePref ? `對方對戀愛的態度：${ROMANCE_PREFS[romancePref]}。` : '',
+    '',
+    `## 你現在的心情：${state.mood.label}（心情 ${state.mood.valence}、精神 ${state.mood.energy}，範圍 -5～5）`,
+  ];
+  if (state.impression) lines.push('', '## 你對對方的印象', state.impression);
+  if (state.memories.length) {
+    lines.push(
+      '',
+      '## 你記得的事（自然地想起來就好，不要硬塞進對話）',
+      ...state.memories.map((m) => {
+        const ago = now.getTime() - m.createdAt.getTime();
+        return `- ${shortDate(m.createdAt, timezone)}（${ago < 3_600_000 ? '剛剛' : `${formatGap(ago)}前`}）：${m.content}`;
+      }),
+    );
+  }
+  return lines.filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 
 /**

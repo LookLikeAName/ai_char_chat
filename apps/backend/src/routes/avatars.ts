@@ -26,6 +26,7 @@ import { checkPersona } from '../persona/check.ts';
 import { generatePersona } from '../persona/generate.ts';
 import { avatarToDto } from '../services/avatars.ts';
 import { assertProfileExists, getProfile, resolveRow } from '../services/llmProfiles.ts';
+import { getRelationship } from '../relationship/service.ts';
 import { loadSettings } from '../services/settings.ts';
 
 const idParams = z.object({ id: z.uuid() });
@@ -106,6 +107,7 @@ export async function avatarRoutes(app: FastifyInstance) {
       await tx.insert(conversationMembers).values({ conversationId: c!.id, avatarId: a!.id });
       return a!;
     });
+    await getRelationship(db, row.id, 'user', input.initialStage ?? 'stranger');
     await changed();
     return reply.status(201).send(await dto(row));
   });

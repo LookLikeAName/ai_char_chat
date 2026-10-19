@@ -5,7 +5,7 @@ import { typingMs } from '../src/reply/timing.ts';
 
 describe('parseReplyOutput', () => {
   it('解析標準格式', () => {
-    expect(parseReplyOutput('{"inner_thought":"他好可愛","messages":["嗨","今天好累"]}')).toEqual({
+    expect(parseReplyOutput('{"inner_thought":"他好可愛","messages":["嗨","今天好累"]}')).toMatchObject({
       innerThought: '他好可愛',
       messages: ['嗨', '今天好累'],
     });

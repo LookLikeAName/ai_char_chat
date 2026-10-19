@@ -1,6 +1,8 @@
 import type {
   AppSettings,
   AvatarDto,
+  AvatarStateDto,
+  InitialStage,
   AvatarInput,
   ConversationDto,
   HealthDto,
@@ -91,6 +93,12 @@ export const api = {
   setSummary: (summary: string) => request<ProfileDto>('PUT', '/api/profile/summary', { summary }),
   generateSummary: () => request<ProfileDto>('POST', '/api/profile/summary/generate'),
 
+  avatarState: (id: string) => request<AvatarStateDto>('GET', `/api/avatars/${id}/state`),
+  deleteMemory: (id: string, memoryId: string) => request<void>('DELETE', `/api/avatars/${id}/memories/${memoryId}`),
+  resetRelationship: (id: string, stage: InitialStage) =>
+    request<{ ok: true }>('POST', `/api/avatars/${id}/relationship/reset`, { stage }),
+  reflectNow: (id: string) => request<{ updated: boolean }>('POST', `/api/avatars/${id}/reflect`),
+
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>
     request<{ messages: MessageDto[]; hasMore: boolean }>('GET', `/api/conversations/${conversationId}/messages?limit=100`),
@@ -108,4 +116,5 @@ export const qk = {
   avatars: ['avatars'] as const,
   conversations: ['conversations'] as const,
   messages: (id: string) => ['messages', id] as const,
+  avatarState: (id: string) => ['avatarState', id] as const,
 };

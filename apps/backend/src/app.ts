@@ -12,6 +12,7 @@ import type { EventPublisher } from './events/bus.ts';
 import type { JobQueue } from './jobs.ts';
 import type { FetchFn } from './llm/index.ts';
 import { avatarRoutes } from './routes/avatars.ts';
+import { avatarStateRoutes } from './routes/avatarState.ts';
 import { conversationRoutes } from './routes/conversations.ts';
 import { healthRoutes } from './routes/health.ts';
 import { llmProfileRoutes } from './routes/llmProfiles.ts';
@@ -65,6 +66,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(settingsRoutes);
       await api.register(llmProfileRoutes);
       await api.register(avatarRoutes);
+      await api.register(avatarStateRoutes);
       await api.register(conversationRoutes);
       await api.register(profileRoutes);
     },

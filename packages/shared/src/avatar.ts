@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { llmBindingSchema } from './llm.ts';
 import { PERSONA_PATHS, type PersonaDraft, type PersonaPath } from './persona.ts';
+import { INITIAL_STAGES } from './relationship.ts';
 
 
 export const avatarInputSchema = z.object({
@@ -17,6 +18,8 @@ export const avatarInputSchema = z.object({
     .array(z.string())
     .transform((a) => [...new Set(a)].filter((p) => PERSONA_PATHS.includes(p)))
     .optional(),
+  /** 只在建立時使用：和玩家的初始關係 */
+  initialStage: z.enum(INITIAL_STAGES).optional(),
 });
 export type AvatarInput = z.infer<typeof avatarInputSchema>;
 

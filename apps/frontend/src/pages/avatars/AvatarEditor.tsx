@@ -9,7 +9,10 @@ import {
   type AvatarDto,
   type AvatarInput,
   type ImageStyle,
+  type InitialStage,
   type LlmBinding,
+  INITIAL_STAGES,
+  STAGE_LABELS,
 } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
@@ -38,6 +41,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
     locks: avatar?.personaLocks ?? [],
   });
   const [llm, setLlm] = useState<LlmBinding | null>(avatar?.llm ?? null);
+  const [initialStage, setInitialStage] = useState<InitialStage>('stranger');
 
   const empty = isPersonaEmpty(p.persona);
   const missing = empty ? [] : missingFields(p.persona);
@@ -77,7 +81,16 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
       className="editor editor-wide"
       onSubmit={(e) => {
         e.preventDefault();
-        if (canSave) save.mutate({ name: p.name, bio: p.bio, llm, persona: p.persona, personaLocks: p.locks });
+        if (canSave) {
+          save.mutate({
+            name: p.name,
+            bio: p.bio,
+            llm,
+            persona: p.persona,
+            personaLocks: p.locks,
+            ...(avatar ? {} : { initialStage }),
+          });
+        }
       }}
     >
       <header className="editor-head">
@@ -122,6 +135,19 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
               <textarea value={p.bio} onChange={(e) => setP({ ...p, bio: e.target.value })} maxLength={500} rows={3} />
               <span className="hint">一句話描述這個角色。人格設定空著時，avatar 只依簡介行動。</span>
             </label>
+            {!avatar && (
+              <label className="field">
+                <span className="field-label">和你的初始關係</span>
+                <select value={initialStage} onChange={(e) => setInitialStage(e.target.value as InitialStage)}>
+                  {INITIAL_STAGES.map((s) => (
+                    <option key={s} value={s}>
+                      {STAGE_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">決定一開始的好感與信任；建立後可以在聊天畫面的資訊面板重設。</span>
+              </label>
+            )}
           </section>
           <AvatarImageCard avatar={avatar} state={p} />
         </>

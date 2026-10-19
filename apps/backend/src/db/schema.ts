@@ -1,6 +1,30 @@
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import type { AllAnswers, LlmBinding, LlmParams, PersonaDraft, Preferences, ProviderType } from '@acc/shared';
+import {
+  bigserial,
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  smallint,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  vector,
+} from 'drizzle-orm/pg-core';
+import type {
+  AllAnswers,
+  LlmBinding,
+  LlmParams,
+  Mood,
+  PersonaDraft,
+  Preferences,
+  ProviderType,
+  RelationshipEventRecord,
+  Stage,
+} from '@acc/shared';
 
 export interface MessageMeta {
   /** avatar 這一輪回覆的內心想法（只存在第一則） */
@@ -71,6 +95,8 @@ export const conversationMembers = pgTable(
     seenUpTo: timestamp('seen_up_to', { withTimezone: true, precision: 3 }),
     /** avatar 已經回應過的玩家訊息（含）到這個時間點；之後的玩家訊息就是「還沒回」 */
     handledUpTo: timestamp('handled_up_to', { withTimezone: true, precision: 3 }),
+    /** 記憶萃取處理到哪個時間點（含） */
+    memoryUpTo: timestamp('memory_up_to', { withTimezone: true, precision: 3 }),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.avatarId] }), index('conversation_members_avatar_idx').on(t.avatarId)],
 );
@@ -123,4 +149,66 @@ export const userProfile = pgTable('user_profile', {
   summaryAt: timestamp('summary_at', { withTimezone: true, precision: 3 }),
   /** 作答或偏好最後變更的時間，用來判斷摘要是否過期 */
   inputsUpdatedAt: timestamp('inputs_updated_at', { withTimezone: true, precision: 3 }),
+});
+
+export const EMBEDDING_DIMS = 768;
+
+/** avatar 各自的長期記憶 */
+export const memories = pgTable(
+  'memories',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    avatarId: uuid('avatar_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    /** event：發生過的事；impression：對某人的整體印象（反思產生） */
+    kind: text('kind').$type<'event' | 'impression'>().notNull(),
+    content: text('content').notNull(),
+    /** 1～10 */
+    importance: integer('importance').notNull().default(5),
+    /** 關於誰：user、avatar:<id>、self */
+    about: text('about').notNull().default('user'),
+    /** 從哪個對話得知；可見性：private（一對一）、group:<id>、public */
+    sourceConversationId: uuid('source_conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+    visibility: text('visibility').notNull().default('private'),
+    embedding: vector('embedding', { dimensions: EMBEDDING_DIMS }),
+    /** 產生向量的模型；換模型後舊向量不能比較，要重新嵌入 */
+    embeddingModel: text('embedding_model'),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+    lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('memories_avatar_idx').on(t.avatarId, t.kind, t.createdAt),
+    index('memories_embedding_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
+  ],
+);
+
+/** avatar 對某個對象的關係（目前只有玩家；第 7 階段加入 avatar 之間） */
+export const relationships = pgTable(
+  'relationships',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    avatarId: uuid('avatar_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    /** user 或另一個 avatar 的 id */
+    target: text('target').notNull(),
+    stage: text('stage').$type<Stage>().notNull(),
+    affinity: integer('affinity').notNull(),
+    trust: integer('trust').notNull(),
+    events: jsonb('events').$type<RelationshipEventRecord[]>().notNull().default([]),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('relationships_avatar_target_idx').on(t.avatarId, t.target)],
+);
+
+/** avatar 的動態狀態 */
+export const avatarState = pgTable('avatar_state', {
+  avatarId: uuid('avatar_id')
+    .primaryKey()
+    .references(() => avatars.id, { onDelete: 'cascade' }),
+  mood: jsonb('mood').$type<Mood>().notNull(),
+  moodUpdatedAt: timestamp('mood_updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** 最後一次反思（整理印象）的時間 */
+  reflectedAt: timestamp('reflected_at', { withTimezone: true }),
 });

@@ -124,6 +124,48 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
+        <h2>記憶</h2>
+        <p className="hint">
+          avatar 用嵌入模型找出和目前對話相關的記憶。沒有設定時改用關鍵字與時間挑選，效果較差。記憶的整理與每日的印象由系統工具模型負責。
+        </p>
+        <label className="field">
+          <span className="field-label">嵌入模型的設定檔</span>
+          <select
+            value={s.embedding?.profileId ?? ''}
+            onChange={(e) =>
+              patch({
+                embedding: e.target.value
+                  ? { profileId: e.target.value, model: s.embedding?.model || 'gemini-embedding-001' }
+                  : null,
+              })
+            }
+          >
+            <option value="">（不使用）</option>
+            {imageProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}（{PROVIDER_LABELS[p.provider]}）
+              </option>
+            ))}
+          </select>
+        </label>
+        {s.embedding && (
+          <label className="field">
+            <span className="field-label">嵌入模型</span>
+            <input
+              value={s.embedding.model}
+              list="embedding-models"
+              onChange={(e) => patch({ embedding: { ...s.embedding!, model: e.target.value } })}
+            />
+            <datalist id="embedding-models">
+              <option value="gemini-embedding-001" />
+              <option value="text-embedding-3-small" />
+            </datalist>
+            <span className="hint">向量固定 768 維；換模型後，舊的記憶會在背景重新嵌入。</span>
+          </label>
+        )}
+      </section>
+
+      <section className="card">
         <h2>頭像生成</h2>
         <p className="hint">用哪個 LLM 設定檔的 API key 與端點，以及哪個圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。</p>
         <label className="field">
@@ -182,7 +224,9 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={!dirty || save.isPending || (!!s.imageGen && !s.imageGen.model.trim())}
+          disabled={
+            !dirty || save.isPending || (!!s.imageGen && !s.imageGen.model.trim()) || (!!s.embedding && !s.embedding.model.trim())
+          }
         >
           {save.isPending ? '儲存中…' : '儲存'}
         </button>

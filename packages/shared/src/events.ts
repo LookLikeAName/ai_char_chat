@@ -14,7 +14,9 @@ export type ServerEvent =
   | { type: 'avatars.changed' }
   | { type: 'llmProfiles.changed' }
   | { type: 'settings.changed' }
-  | { type: 'profile.changed' };
+  | { type: 'profile.changed' }
+  /** 心情、關係或記憶有變化 */
+  | { type: 'avatar.state.changed'; avatarId: string };
 
 export interface HealthDto {
   ok: boolean;

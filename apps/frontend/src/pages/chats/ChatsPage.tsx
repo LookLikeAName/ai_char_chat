@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { PROVIDER_LABELS, resolveParams, type AvatarDto, type ConversationDto, type MessageDto } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
+import { AvatarStatePanel } from '../../components/AvatarStatePanel.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { clockTime, dayLabel, sameDay, shortTime } from '../../lib/format.ts';
@@ -414,13 +415,8 @@ function InfoPanel({
                 <span className="warn-text">尚未綁定 LLM</span>
               )}
             </dd>
-            <dt>心情</dt>
-            <dd className="hint">第 5 階段加入</dd>
-            <dt>關係</dt>
-            <dd className="hint">第 5 階段加入（好感度、信任度、關係階段）</dd>
-            <dt>它記得你的事</dt>
-            <dd className="hint">第 5 階段加入</dd>
           </dl>
+          <AvatarStatePanel avatarId={avatar.id} />
         </div>
       ) : (
         <p className="hint pad">群組成員資訊在第 7 階段加入。</p>

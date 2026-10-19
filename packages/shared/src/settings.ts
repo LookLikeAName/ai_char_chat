@@ -21,6 +21,11 @@ export const appSettingsSchema = z.object({
     .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
     .nullable()
     .default(null),
+  /** 記憶用的嵌入模型（Google 或 OpenAI 相容），向量固定 768 維 */
+  embedding: z
+    .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
+    .nullable()
+    .default(null),
   /** 全域每日 token 上限；0 表示不限 */
   dailyTokenLimit: z.number().int().min(0).default(0),
 });
