@@ -269,10 +269,21 @@ function groupSection(g: PromptGroup): string {
   const lines = [`## 群組成員`];
   for (const m of g.members) {
     const r = m.relationship;
+    // 還不認識的人：只知道名字和他在群組裡說過的話
+    const unknown = r?.stage === 'stranger' && !m.relation;
     lines.push(
-      `- ${m.name}：${m.bio || '（沒有簡介）'}${m.relation ? `\n  你們是：${m.relation}` : ''}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`,
+      `- ${m.name}：${unknown ? '（還不認識，只知道名字）' : m.bio || '（沒有簡介）'}${m.relation ? `\n  你們是：${m.relation}` : ''}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`,
     );
   }
+  const strangers = g.members.filter((m) => m.relationship?.stage === 'stranger').map((m) => m.name);
+  const newcomers = g.members.filter((m) => m.relationship?.stage === 'acquaintance' && !m.relation).map((m) => m.name);
+  if (strangers.length) {
+    lines.push(
+      '',
+      `你和${strangers.join('、')}還不認識：你只知道他們在這個群組裡說過的話。可以打招呼、自我介紹、好奇地問對方是做什麼的，態度依你的個性（可能熱情、也可能有點拘謹）；不要裝熟，也不要說出你不可能知道的事。`,
+    );
+  }
+  if (newcomers.length) lines.push('', `你和${newcomers.join('、')}才剛認識不久：友善但還有點客氣，正在互相了解。`);
   lines.push(
     '',
     `標記「私下得知」的記憶，是在私訊裡聽說的（「在別的群組聽說」的也一樣不是這裡的人都知道）：${

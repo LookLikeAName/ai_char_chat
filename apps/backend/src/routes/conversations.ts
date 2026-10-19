@@ -148,9 +148,12 @@ export async function conversationRoutes(app: FastifyInstance) {
     if (rows.length !== new Set(ids).size) throw new HttpError(400, '有不存在的 avatar');
   }
 
-  /** 同一個群組的 avatar 之間，第一次見面當作認識 */
+  /**
+   * 同一個群組的 avatar 之間建立關係：設成相關角色的已經有了；原本不認識的從陌生開始，
+   * 之後在群組裡一起聊天會慢慢變熟（growFamiliarity）。
+   */
   async function ensurePairs(ids: string[]) {
-    for (const a of ids) for (const b of ids) if (a !== b) await getRelationship(db, a, `avatar:${b}`, 'acquaintance');
+    for (const a of ids) for (const b of ids) if (a !== b) await getRelationship(db, a, `avatar:${b}`, 'stranger');
   }
 
   app.post('/conversations', async (req, reply) => {

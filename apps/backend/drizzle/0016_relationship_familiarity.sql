@@ -1,0 +1,1 @@
+ALTER TABLE "relationships" ADD COLUMN "familiarity" jsonb;

@@ -90,6 +90,7 @@ export function GroupDialog({
             成員 <span className="hint">（{selected.length}／{MAX_MEMBERS}，至少 2 位）</span>
           </legend>
           {avatars.length < 2 && <p className="hint">至少要有 2 個 avatar 才能建立群組。</p>}
+          <p className="hint">沒有設成「相關的角色」的成員彼此一開始不認識，會在群組裡聊著聊著慢慢熟起來。</p>
           <ul>
             {avatars.map((a) => (
               <li key={a.id}>

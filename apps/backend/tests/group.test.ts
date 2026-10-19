@@ -9,7 +9,7 @@ import { appSettingsSchema, type AppSettings } from '@acc/shared';
 import { buildApp } from '../src/app.ts';
 import { SecretBox } from '../src/crypto.ts';
 import { createDb, runMigrations } from '../src/db/client.ts';
-import { avatars, conversations, llmProfiles, messages } from '../src/db/schema.ts';
+import { avatars, conversationMembers, conversations, llmProfiles, messages, relationships } from '../src/db/schema.ts';
 import type { AgentJob } from '../src/jobs.ts';
 import type { FetchFn } from '../src/llm/index.ts';
 import { MemoryLock } from '../src/lock.ts';
@@ -129,13 +129,13 @@ describe.skipIf(!url)('群組', () => {
     await pool.end();
   });
 
-  it('建立群組：出現在對話列表，成員之間建立「認識」的關係', async () => {
+  it('建立群組：出現在對話列表，原本不認識的成員之間從「陌生」開始', async () => {
     const list = (await app.inject({ url: '/api/conversations' })).json();
     const g = list.find((c: { id: string }) => c.id === groupId);
     expect(g).toMatchObject({ type: 'group', title: '週末團' });
     expect(g.members).toHaveLength(3);
     const r = await getRelationship(db, ids['小雨']!, `avatar:${ids['阿哲']}`);
-    expect(r.stage).toBe('acquaintance');
+    expect(r).toMatchObject({ stage: 'stranger', affinity: 0, trust: 10 });
     const bad = await app.inject({ method: 'POST', url: '/api/conversations', payload: { title: 'x', avatarIds: [ids['小雨']] } });
     expect(bad.statusCode).toBe(400);
   });
@@ -203,8 +203,50 @@ describe.skipIf(!url)('群組', () => {
     await say('阿哲你覺得呢');
     await engine().handleGroupTurn(groupId, { force: true });
     const r = await getRelationship(db, ids['阿哲']!, `avatar:${ids['美美']}`);
-    // 認識的起始好感 15，+2
-    expect(r.affinity).toBe(17);
+    // 陌生的起始好感 0，+2（美美這次沒說話，所以沒有一起聊天變熟的部分）
+    expect(r.affinity).toBe(2);
+  });
+
+  it('一起在群組裡聊天會慢慢變熟：每次 +1，每天有上限，熟到「認識」時記一筆', async () => {
+    const rel = (a: string, b: string) => getRelationship(db, ids[a]!, `avatar:${ids[b]}`);
+    replyFor = (name) => (name === '美美' ? { messages: [] } : { messages: [`我是${name}`] });
+    await say('小雨、阿哲，你們好');
+    await engine().handleGroupTurn(groupId, { force: true });
+    // 兩個人都說了話：互相 +1；沒說話的美美不變
+    expect(await rel('小雨', '阿哲')).toMatchObject({ affinity: 1, trust: 11 });
+    expect(await rel('阿哲', '小雨')).toMatchObject({ affinity: 1, trust: 11 });
+    expect((await rel('小雨', '美美')).affinity).toBe(0);
+
+    // prompt 裡寫出還不認識，只知道名字
+    const system = prompts.find((p) => p.who === '阿哲')!.body.messages[0].content as string;
+    expect(system).toContain('- 小雨：（還不認識，只知道名字）');
+    expect(system).toMatch(/你和(小雨、美美|美美、小雨)還不認識/);
+
+    for (let i = 0; i < 5; i++) {
+      await say(`小雨、阿哲，第 ${i} 輪`);
+      await engine().handleGroupTurn(groupId, { force: true });
+    }
+    // 每天最多 4 次（兩個人誰說話都算）
+    expect((await rel('小雨', '阿哲')).affinity).toBe(4);
+    expect((await rel('阿哲', '小雨')).affinity).toBe(4);
+
+    // 隔天繼續，熟到「認識」
+    await db
+      .update(relationships)
+      .set({ affinity: 9, familiarity: { day: '2000-01-01', count: 4 } })
+      .where(and(eq(relationships.avatarId, ids['小雨']!), eq(relationships.target, `avatar:${ids['阿哲']}`)));
+    await say('小雨、阿哲，再聊一下');
+    await engine().handleGroupTurn(groupId, { force: true });
+    const after = await rel('小雨', '阿哲');
+    expect(after.stage).toBe('acquaintance');
+    expect(after.events.at(-1)).toMatchObject({ from: 'stranger', to: 'acquaintance', note: '在群組裡聊著聊著熟了起來' });
+
+    // 認識之後，一對一聊天時也知道這個人
+    const [dm] = await db.insert(conversations).values({ type: 'dm' }).returning();
+    await db.insert(conversationMembers).values({ conversationId: dm!.id, avatarId: ids['小雨']! });
+    const preview = (await app.inject({ url: `/api/debug/preview/${dm!.id}` })).json();
+    expect(preview.system).toContain('- 阿哲：在群組裡認識的（你們現在：認識）');
+    expect(preview.system).not.toContain('- 美美：');
   });
 
   it('重試會強制開始一輪', async () => {

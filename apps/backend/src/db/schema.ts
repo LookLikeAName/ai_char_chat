@@ -259,7 +259,7 @@ export const memories = pgTable(
   ],
 );
 
-/** avatar 對某個對象的關係（目前只有玩家；第 7 階段加入 avatar 之間） */
+/** avatar 對某個對象的關係：玩家（target = user）或另一個 avatar（target = avatar:<id>） */
 export const relationships = pgTable(
   'relationships',
   {
@@ -273,6 +273,8 @@ export const relationships = pgTable(
     affinity: integer('affinity').notNull(),
     trust: integer('trust').notNull(),
     events: jsonb('events').$type<RelationshipEventRecord[]>().notNull().default([]),
+    /** avatar 之間：在群組裡一起聊天、自然變熟的次數（當地日期與當天已經算了幾次） */
+    familiarity: jsonb('familiarity').$type<{ day: string; count: number }>(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('relationships_avatar_target_idx').on(t.avatarId, t.target)],

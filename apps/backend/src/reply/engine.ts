@@ -16,6 +16,7 @@ import {
   GROUP_MESSAGE_BUDGET,
   localClock,
   mentions,
+  STAGE_LABELS,
   type AppSettings,
   type SpeakerCandidate,
   type AvatarLink,
@@ -33,7 +34,7 @@ import { embedderFromSettings } from '../memory/embedder.ts';
 import { bigramSimilarity, latestImpression, retrieveMemories } from '../memory/store.ts';
 import { attachParsed, logEvent, withScope } from '../observability.ts';
 import { loadProfile } from '../profile/service.ts';
-import { applyInteraction, getMood, getRelationship, setMood } from '../relationship/service.ts';
+import { applyInteraction, getMood, getRelationship, growFamiliarity, setMood } from '../relationship/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
 import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
@@ -696,6 +697,24 @@ export class ReplyEngine {
         others.push(`對${name}的好感 ${r.before.affinity} → ${r.after.affinity}`);
       }
     }
+    // 群組：一起聊天的成員（還不熟的）自然變熟一點，每一對每天有上限
+    if (ctx.type === 'group') {
+      const { timezone } = await loadSettings(db);
+      const day = localClock(this.now(), timezone).date;
+      const names = await this.memberNames(ctx.conversationId);
+      for (const id of await this.recentSpeakers(ctx.conversationId, ctx.avatar.id)) {
+        if (!names.has(id)) continue;
+        // 雙向：先說話的人也會因為後來接話的人而變熟
+        const r = await growFamiliarity(db, ctx.avatar.id, id, day, warmUp);
+        if (r && r.before.stage !== r.after.stage) {
+          others.push(`和${names.get(id)}熟了起來：${STAGE_LABELS[r.before.stage]} → ${STAGE_LABELS[r.after.stage]}`);
+        }
+        const back = await growFamiliarity(db, id, ctx.avatar.id, day);
+        if (back && back.before.stage !== back.after.stage) {
+          await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: id });
+        }
+      }
+    }
     const changed =
       output.mood || others.length || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
     if (changed) {
@@ -734,6 +753,16 @@ export class ReplyEngine {
     const now = this.now();
     const links = (await loadLinks(db, [ctx.avatar.id])).get(ctx.avatar.id) ?? [];
     const acquaintances = await linkedAvatars(db, links);
+    // 在群組裡認識的（沒有設成相關角色、已經不是陌生人的）
+    const met = await db
+      .select({ id: avatars.id, name: avatars.name, bio: avatars.bio, persona: avatars.persona })
+      .from(relationships)
+      .innerJoin(avatars, sql`${relationships.target} = 'avatar:' || ${avatars.id}::text`)
+      .where(and(eq(relationships.avatarId, ctx.avatar.id), ne(relationships.stage, 'stranger')));
+    for (const m of met) {
+      if (m.id === ctx.avatar.id || acquaintances.some((a) => a.id === m.id)) continue;
+      acquaintances.push({ ...m, relation: '在群組裡認識的', stage: 'acquaintance' });
+    }
     const otherStages = acquaintances.length
       ? await db
           .select({ target: relationships.target, stage: relationships.stage })
@@ -836,7 +865,7 @@ export class ReplyEngine {
     const members = [];
     for (const { avatar } of rows) {
       if (avatar.id === ctx.avatar.id) continue;
-      const r = await getRelationship(db, ctx.avatar.id, `avatar:${avatar.id}`, 'acquaintance');
+      const r = await getRelationship(db, ctx.avatar.id, `avatar:${avatar.id}`, 'stranger');
       members.push({
         id: avatar.id,
         name: avatar.name,
@@ -855,6 +884,19 @@ export class ReplyEngine {
       mentioned: situation.mentioned,
       before: situation.before,
     };
+  }
+
+  /** 剛剛一起在群組裡說話的其他成員：最近 15 則裡、和最新一則相隔兩小時內的 */
+  private async recentSpeakers(conversationId: string, selfId: string): Promise<string[]> {
+    const rows = await this.deps.db
+      .select({ who: messages.senderAvatarId, at: messages.createdAt })
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversationId), inArray(messages.senderType, ['user', 'avatar'])))
+      .orderBy(desc(messages.createdAt), desc(messages.seq))
+      .limit(15);
+    const latest = rows[0]?.at.getTime() ?? 0;
+    const ids = rows.filter((r) => latest - r.at.getTime() < 2 * 3_600_000).map((r) => r.who);
+    return [...new Set(ids.filter((w): w is string => !!w && w !== selfId))];
   }
 
   private async memberNames(conversationId: string): Promise<Map<string, string>> {

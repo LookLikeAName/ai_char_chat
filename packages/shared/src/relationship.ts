@@ -59,6 +59,13 @@ export const EVENT_LABELS: Record<RelationshipEventType, string> = {
   breakup: '分手',
 };
 
+/**
+ * avatar 之間在群組裡一起聊天就會慢慢變熟：每次在同一段對話裡說到話，好感與信任各 +1，
+ * 每一對每天最多算這麼多次，到「朋友」為止；之後就看聊天的內容（others_affinity）。
+ */
+export const FAMILIARITY_DAILY_CAP = 4;
+export const FAMILIARITY_STAGES: readonly Stage[] = ['stranger', 'acquaintance'];
+
 /** 單次回覆最多改變多少，避免一句話就暴衝 */
 export const MAX_DELTA = 3;
 

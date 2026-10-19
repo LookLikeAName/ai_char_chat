@@ -3,6 +3,8 @@ import {
   applyDeltas,
   decayMood,
   EVENT_LABELS,
+  FAMILIARITY_DAILY_CAP,
+  FAMILIARITY_STAGES,
   INITIAL_VALUES,
   NEUTRAL_MOOD,
   type InitialStage,
@@ -83,4 +85,32 @@ export async function setMood(db: Db, avatarId: string, mood: Mood): Promise<voi
     .insert(avatarState)
     .values({ avatarId, mood, moodUpdatedAt: new Date() })
     .onConflictDoUpdate({ target: avatarState.avatarId, set: { mood, moodUpdatedAt: new Date() } });
+}
+
+/**
+ * avatar 之間在群組裡一起聊天：還不熟（陌生、認識）的話自然變熟一點，每一對每天有上限。
+ * day 是當地日期；沒有變化時回傳 null。
+ */
+export async function growFamiliarity(
+  db: Db,
+  avatarId: string,
+  otherId: string,
+  day: string,
+  warmUp: 'slow' | 'medium' | 'fast' = 'medium',
+): Promise<{ before: RelationshipState; after: RelationshipState } | null> {
+  const row = await getRelationship(db, avatarId, `avatar:${otherId}`, 'stranger');
+  if (!FAMILIARITY_STAGES.includes(row.stage)) return null;
+  const count = row.familiarity?.day === day ? row.familiarity.count : 0;
+  if (count >= FAMILIARITY_DAILY_CAP) return null;
+  const before: RelationshipState = { stage: row.stage, affinity: row.affinity, trust: row.trust };
+  const after = applyDeltas(before, { affinity: 1, trust: 1 }, warmUp);
+  const events = [...row.events];
+  if (after.stage !== before.stage) {
+    events.push({ type: 'reconciled', note: '在群組裡聊著聊著熟了起來', at: new Date().toISOString(), from: before.stage, to: after.stage });
+  }
+  await db
+    .update(relationships)
+    .set({ ...after, events: events.slice(-MAX_EVENTS), familiarity: { day, count: count + 1 }, updatedAt: new Date() })
+    .where(eq(relationships.id, row.id));
+  return { before, after };
 }
