@@ -14,11 +14,13 @@ export async function requestJson<T>(
   init: { method?: string; headers: Record<string, string>; body?: unknown; signal?: AbortSignal },
 ): Promise<T> {
   let res: Response;
+  // FormData（上傳檔案）由 fetch 自己帶 multipart 的 content-type
+  const form = init.body instanceof FormData;
   try {
     res = await fetchFn(url, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
-      headers: init.body === undefined ? init.headers : { 'content-type': 'application/json', ...init.headers },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      headers: init.body === undefined || form ? init.headers : { 'content-type': 'application/json', ...init.headers },
+      body: init.body === undefined ? undefined : form ? (init.body as FormData) : JSON.stringify(init.body),
       signal: init.signal ?? AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
   } catch (err) {

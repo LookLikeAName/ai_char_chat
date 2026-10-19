@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { avatarPhotoSchema, IMAGE_STYLES, type AvatarPhoto, type ImageStyle } from './images.ts';
 import { llmBindingSchema } from './llm.ts';
 import { PERSONA_PATHS, type PersonaDraft, type PersonaPath } from './persona.ts';
 import { INITIAL_STAGES } from './relationship.ts';
@@ -20,6 +21,8 @@ export const avatarInputSchema = z.object({
     .optional(),
   /** 每天最多用多少 tokens（0 = 不限）；省略表示不變更 */
   dailyTokenLimit: z.number().int().min(0).max(1_000_000_000).optional(),
+  /** 傳照片的方式（入鏡方式、參考圖、風格）；省略表示不變更 */
+  photo: avatarPhotoSchema.optional(),
   /** 只在建立時使用：和玩家的初始關係 */
   initialStage: z.enum(INITIAL_STAGES).optional(),
 });
@@ -38,6 +41,9 @@ export interface AvatarDto {
   personaComplete: boolean;
   /** 每天最多用多少 tokens（0 = 不限） */
   dailyTokenLimit: number;
+  photo: AvatarPhoto;
+  /** 另外上傳的照片參考圖 */
+  photoReferenceUrl: string | null;
   /** 依作息推算的目前狀態 */
   availability: { status: 'free' | 'busy' | 'sleep'; activity: string; until: string | null };
   /** 這個 avatar 的一對一聊天 */
@@ -87,22 +93,6 @@ export interface PersonaIssue {
 export const avatarImageGenerateSchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
 });
-
-export const IMAGE_STYLES = {
-  anime: '日系動漫插畫風格，乾淨的線條與柔和上色',
-  illustration: '溫暖的數位插畫風格',
-  realistic: '寫實人像攝影，自然光，淺景深',
-  watercolor: '水彩插畫風格',
-  render3d: '3D 動畫電影角色風格',
-} as const;
-export type ImageStyle = keyof typeof IMAGE_STYLES;
-export const IMAGE_STYLE_LABELS: Record<ImageStyle, string> = {
-  anime: '動漫插畫',
-  illustration: '數位插畫',
-  realistic: '寫實照片',
-  watercolor: '水彩',
-  render3d: '3D 動畫',
-};
 
 /** 依外貌與穿著組出預設的頭像提示詞，玩家可以再修改 */
 export function defaultImagePrompt(name: string, persona: PersonaDraft, style: ImageStyle): string {

@@ -85,6 +85,13 @@
       "when": 1792404713321,
       "tag": "0011_images",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792406154702,
+      "tag": "0012_avatar_photo",
+      "breakpoints": true
     }
   ]
 }

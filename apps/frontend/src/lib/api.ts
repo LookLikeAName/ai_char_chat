@@ -27,6 +27,7 @@ import type {
   GroupInput,
   UsageSummaryDto,
   AuthStatusDto,
+  AvatarPhoto,
   UploadDto,
   ImportRequest,
   ImportResultDto,
@@ -108,6 +109,14 @@ export const api = {
     form.append('file', file);
     return request<AvatarDto>('POST', `/api/avatars/${id}/image`, form);
   },
+  uploadPhotoReference: (id: string, blob: Blob) => {
+    const form = new FormData();
+    form.append('file', blob, blob instanceof File ? blob.name : 'reference.jpg');
+    return request<AvatarDto>('POST', `/api/avatars/${id}/photo-reference`, form);
+  },
+  deletePhotoReference: (id: string) => request<AvatarDto>('DELETE', `/api/avatars/${id}/photo-reference`),
+  testPhoto: (id: string, description: string, photo: AvatarPhoto) =>
+    request<{ url: string; width: number | null; height: number | null }>('POST', `/api/avatars/${id}/photo/test`, { description, photo }),
   deleteAvatarImage: (id: string) => request<AvatarDto>('DELETE', `/api/avatars/${id}/image`),
   generateAvatarImage: (id: string, prompt: string) =>
     request<AvatarDto>('POST', `/api/avatars/${id}/image/generate`, { prompt }),

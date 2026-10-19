@@ -21,7 +21,7 @@ import { avatars, avatarState, conversationMembers, conversations, memories, mes
 import { notFound, parseBody } from '../errors.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { backfillEmbeddings } from '../memory/store.ts';
-import { validatePersona } from '../services/avatars.ts';
+import { avatarPhoto, validatePersona } from '../services/avatars.ts';
 import { assertProfileExists } from '../services/llmProfiles.ts';
 import { loadSettings } from '../services/settings.ts';
 import { IMAGE_TYPES } from './avatars.ts';
@@ -44,12 +44,12 @@ export async function transferRoutes(app: FastifyInstance) {
   }
 
   async function card(row: typeof avatars.$inferSelect, opts: z.infer<typeof exportOptionsSchema>): Promise<AvatarCard> {
-    let image: AvatarCard['image'] = null;
-    if (row.imagePath) {
-      const mime = MIME_BY_EXT[path.extname(row.imagePath).slice(1)];
-      const data = await readFile(path.join(mediaDir, row.imagePath)).catch(() => null);
-      if (mime && data) image = { mime: mime as NonNullable<AvatarCard['image']>['mime'], data: data.toString('base64') };
-    }
+    const readImage = async (file: string | null): Promise<AvatarCard['image']> => {
+      if (!file) return null;
+      const mime = MIME_BY_EXT[path.extname(file).slice(1)];
+      const data = await readFile(path.join(mediaDir, file)).catch(() => null);
+      return mime && data ? { mime: mime as NonNullable<AvatarCard['image']>['mime'], data: data.toString('base64') } : null;
+    };
     const out: AvatarCard = {
       name: row.name,
       bio: row.bio,
@@ -57,7 +57,9 @@ export async function transferRoutes(app: FastifyInstance) {
       personaLocks: row.personaLocks,
       llmParams: row.llm?.params ?? {},
       dailyTokenLimit: row.dailyTokenLimit,
-      image,
+      image: await readImage(row.imagePath),
+      photo: avatarPhoto(row),
+      photoReference: await readImage(row.photoReferencePath),
     };
     if (opts.memories) {
       const [[rel], [state], mems] = await Promise.all([
@@ -152,12 +154,15 @@ export async function transferRoutes(app: FastifyInstance) {
       // 整批在同一個交易裡：中途失敗就全部不算
       await db.transaction(async (tx) => {
         for (const { c, persona } of prepared) {
-          let imagePath: string | null = null;
-          if (c.image) {
-            imagePath = `avatars/${randomUUID()}.${IMAGE_TYPES[c.image.mime]}`;
-            await writeFile(path.join(mediaDir, imagePath), Buffer.from(c.image.data, 'base64'));
-            written.push(imagePath);
-          }
+          const save = async (img: AvatarCard['image'] | undefined, kind: string) => {
+            if (!img) return null;
+            const rel = `avatars/${randomUUID()}${kind}.${IMAGE_TYPES[img.mime]}`;
+            await writeFile(path.join(mediaDir, rel), Buffer.from(img.data, 'base64'));
+            written.push(rel);
+            return rel;
+          };
+          const imagePath = await save(c.image, '');
+          const photoReferencePath = await save(c.photoReference, '-ref');
           const msgs = include.history ? (c.messages ?? []) : [];
           const mems = include.memories ? (c.memories ?? []) : [];
           const [a] = await tx
@@ -170,6 +175,8 @@ export async function transferRoutes(app: FastifyInstance) {
               personaLocks: c.personaLocks.filter((p) => PERSONA_PATHS.includes(p)),
               llm: profileId ? { profileId, params: c.llmParams } : null,
               dailyTokenLimit: c.dailyTokenLimit,
+              photo: c.photo ?? {},
+              photoReferencePath,
             })
             .returning();
           const avatarId = a!.id;

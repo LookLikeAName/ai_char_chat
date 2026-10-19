@@ -15,6 +15,7 @@ import {
   type LifeLogEvent,
   type Mood,
   type Persona,
+  type PhotoAppears,
   type PersonaDraft,
   type Preferences,
   type RelationshipState,
@@ -108,8 +109,8 @@ export interface ReplyPromptInput {
   /** 由舊到新 */
   history: HistoryMessage[];
   images?: HistoryImages;
-  /** 可以傳照片（有設定圖片模型）；remaining 是今天還能傳幾張 */
-  photos?: { remaining: number } | null;
+  /** 可以傳照片（有設定圖片模型）；remaining 是今天還能傳幾張，appears／proxy 是它在照片裡怎麼出現 */
+  photos?: { remaining: number; appears?: PhotoAppears; proxy?: string } | null;
   now: Date;
 }
 
@@ -198,15 +199,25 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''
 ${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
 - relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
       : ''
-  }${photos ? photoSection(photos.remaining, settings.adultContent) : ''}`;
+  }${photos ? photoSection(photos, settings.adultContent) : ''}`;
 }
 
 /** 可以傳照片時才出現：什麼時候傳、怎麼描述 */
-function photoSection(remaining: number, adult: boolean): string {
-  if (remaining <= 0) return '\n- 今天已經傳了很多照片，這次不要再傳（不要填 photo）。';
+function photoSection(p: NonNullable<ReplyPromptInput['photos']>, adult: boolean): string {
+  if (p.remaining <= 0) return '\n- 今天已經傳了很多照片，這次不要再傳（不要填 photo）。';
+  const appears = p.appears ?? 'self';
+  const who =
+    appears === 'self'
+      ? { examples: '或拍一張自拍', detail: '有你自己入鏡（自拍）時寫出表情、動作、穿著。' }
+      : appears === 'proxy'
+        ? {
+            examples: `或拍${p.proxy || '你的玩偶'}`,
+            detail: `你不會讓自己入鏡，不拍自拍；想「拍自己」的時候，會改拍${p.proxy || '你的玩偶'}（例如放在桌上、拿在手上），描述它擺在哪裡、什麼姿勢。`,
+          }
+        : { examples: '', detail: '你不會讓自己入鏡，不拍自拍，照片裡不會出現你的臉。' };
   return `
-- photo：平常省略。想用手機傳一張照片時才加上 "photo": "照片的內容"，例如對方想看、你想分享正在吃的東西、看到的風景、或拍一張自拍。不要每次都傳，今天最多還能傳 ${remaining} 張。
-  照片會照你的描述拍出來，所以要具體：拍了什麼、在哪裡、角度與光線；有你自己入鏡（自拍）時寫出表情、動作、穿著。描述用第三人稱寫畫面，不要寫對話。${adult ? '' : '照片內容要適合一般場合。'}
+- photo：平常省略。想用手機傳一張照片時才加上 "photo": "照片的內容"，例如對方想看、你想分享正在吃的東西、看到的風景${who.examples ? `、${who.examples}` : ''}。不要每次都傳，今天最多還能傳 ${p.remaining} 張。
+  照片會照你的描述拍出來，所以要具體：拍了什麼、在哪裡、角度與光線。${who.detail}描述用第三人稱寫畫面，不要寫對話。${adult ? '' : '照片內容要適合一般場合。'}
   照片和 messages 會一起傳出；只傳照片的話 messages 可以是 []。`;
 }
 

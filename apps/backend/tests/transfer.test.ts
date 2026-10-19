@@ -95,6 +95,7 @@ describe.skipIf(!url)('匯出／匯入', () => {
     expect(card!.memories).toBeUndefined();
     expect(card!.messages).toBeUndefined();
     expect(JSON.stringify(file)).not.toContain(profileId);
+    expect(card!.photo).toMatchObject({ appears: 'self', reference: 'avatar' });
   });
 
   it('帶記憶與紀錄匯出，再匯入成新的 avatar：綁定選的設定檔、關係與記憶都在、紀錄算已讀已回', async () => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IMAGE_STYLES, type ImageStyle } from './avatar.ts';
+import { IMAGE_STYLES, type ImageStyle } from './images.ts';
 import { llmBindingSchema } from './llm.ts';
 
 const imageStyles = Object.keys(IMAGE_STYLES) as [ImageStyle, ...ImageStyle[]];

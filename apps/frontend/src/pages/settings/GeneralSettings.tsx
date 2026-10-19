@@ -282,7 +282,7 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
           </div>
         )}
         <p className="hint">
-          avatar 會在自然的時候傳照片（你想看、分享吃的東西或風景、自拍）。用 Gemini 的圖片模型時，會拿頭像當參考，照片裡的人比較像它；每張照片都要付圖片模型的費用。
+          avatar 會在自然的時候傳照片（你想看、分享吃的東西或風景、自拍）。每個 avatar 可以在自己的「基本資料 → 照片」設定入鏡方式（自己、用娃娃之類的代替、不入鏡）、參考圖與風格；這裡的風格是預設值。每張照片都要付圖片模型的費用。
           {!s.imageGen && s.photos.enabled && ' 要先選好上面的圖片模型才會傳。'}
         </p>
       </section>

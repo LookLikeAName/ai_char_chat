@@ -1,6 +1,7 @@
 // 匯出／匯入 avatar 的檔案格式。一個檔案可以有一個或多個 avatar。
 // 不包含 API key 與 LLM 設定檔（匯入時另外選），也不包含群組（成員對不上）。
 import { z } from 'zod';
+import { avatarPhotoSchema } from './images.ts';
 import { llmParamsSchema } from './llm.ts';
 import { moodSchema, RELATIONSHIP_EVENTS, STAGES } from './relationship.ts';
 
@@ -11,6 +12,12 @@ export const TRANSFER_MAX_MESSAGES = 5000;
 
 const iso = z.string().datetime({ offset: true });
 
+const imageSchema = z.object({
+  mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  /** base64 */
+  data: z.string().max(8_000_000),
+});
+
 export const avatarCardSchema = z.object({
   name: z.string().trim().min(1).max(40),
   bio: z.string().max(500).default(''),
@@ -19,14 +26,11 @@ export const avatarCardSchema = z.object({
   /** 原本綁定時覆寫的參數 */
   llmParams: llmParamsSchema.default({}),
   dailyTokenLimit: z.number().int().min(0).default(0),
-  image: z
-    .object({
-      mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
-      /** base64 */
-      data: z.string().max(8_000_000),
-    })
-    .nullable()
-    .default(null),
+  image: imageSchema.nullable().default(null),
+  /** 傳照片的方式；舊的匯出檔沒有，用預設值 */
+  photo: avatarPhotoSchema.optional(),
+  /** 照片的參考圖（另外上傳的那張） */
+  photoReference: imageSchema.nullable().optional(),
   /** 下面三項匯出時可以選擇不帶 */
   relationship: z
     .object({

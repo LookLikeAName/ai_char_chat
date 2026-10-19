@@ -1,5 +1,6 @@
 // 圖片：格式判斷、送給各家模型的格式、對話紀錄裡的圖片、avatar 的照片輸出與描述
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_AVATAR_PHOTO } from '@acc/shared';
 import { inspectImage } from '../src/images/inspect.ts';
 import { complete, type FetchFn } from '../src/llm/index.ts';
 import { loggedContent } from '../src/llm/content.ts';
@@ -143,10 +144,51 @@ describe('avatar 的照片', () => {
   });
 
   it('照片的 prompt 帶上外貌；有參考圖時要求長得一樣', () => {
-    const p = photoPrompt({ name: '小雨', persona: SAMPLE_PERSONA }, '在吧檯後面比耶的自拍', { style: 'realistic', adult: false, hasReference: true });
+    const p = photoPrompt({ name: '小雨', persona: SAMPLE_PERSONA }, '在吧檯後面比耶的自拍', {
+      photo: DEFAULT_AVATAR_PHOTO,
+      style: 'realistic',
+      adult: false,
+      hasReference: true,
+    });
     expect(p).toContain('畫面：在吧檯後面比耶的自拍');
     expect(p).toContain('短髮染成深棕色');
     expect(p).toContain('參考圖');
     expect(p).toContain('非裸露');
+  });
+
+  it('不入鏡、用娃娃代替：照片的 prompt 不寫外貌，改寫代替的東西', () => {
+    const doll = photoPrompt({ name: '小雨', persona: SAMPLE_PERSONA }, '娃娃坐在窗邊', {
+      photo: { ...DEFAULT_AVATAR_PHOTO, appears: 'proxy', proxy: '一隻白色長耳兔玩偶' },
+      style: 'realistic',
+      adult: false,
+      hasReference: true,
+    });
+    expect(doll).toContain('一隻白色長耳兔玩偶，外觀要和參考圖裡的一樣');
+    expect(doll).not.toContain('短髮染成深棕色');
+    const none = photoPrompt({ name: '小雨', persona: SAMPLE_PERSONA }, '桌上的咖啡', {
+      photo: { ...DEFAULT_AVATAR_PHOTO, appears: 'none' },
+      style: 'anime',
+      adult: true,
+      hasReference: false,
+    });
+    expect(none).toContain('不會出現在照片裡');
+    expect(none).not.toContain('短髮');
+  });
+
+  it('avatar 的 prompt 依入鏡方式說明：用娃娃代替時不自拍', () => {
+    const base = {
+      avatar: { name: '小雨', bio: '', persona: SAMPLE_PERSONA },
+      user: null,
+      situation: { mode: 'reply' as const, reason: 'normal' as const },
+      settings: { timezone: 'Asia/Taipei', adultContent: false },
+      history: [],
+      now: new Date('2026-10-19T10:00:00Z'),
+      state: { relationship: { stage: 'friend' as const, affinity: 30, trust: 30 }, mood: { label: '平常', valence: 0, energy: 0 }, memories: [], impression: null },
+    };
+    const doll = buildSystemPrompt({ ...base, photos: { remaining: 2, appears: 'proxy', proxy: '兔子玩偶' } });
+    expect(doll).toContain('會改拍兔子玩偶');
+    expect(doll).toContain('不拍自拍');
+    expect(buildSystemPrompt({ ...base, photos: { remaining: 2, appears: 'none' } })).toContain('照片裡不會出現你的臉');
+    expect(buildSystemPrompt({ ...base, photos: { remaining: 2, appears: 'self' } })).toContain('或拍一張自拍');
   });
 });

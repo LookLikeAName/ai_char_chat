@@ -13,7 +13,7 @@ export interface GeneratedImage {
 const TIMEOUT_MS = 120_000;
 
 export interface ImageOptions {
-  /** 參考圖（例如 avatar 的頭像，讓照片裡的人長得一樣）；目前只有 Gemini 的圖片模型用得到 */
+  /** 參考圖（讓照片裡的人或東西每張都一樣）；Gemini 的圖片模型與 gpt-image 用得到，其他模型忽略 */
   reference?: { mime: string; data: Buffer } | null;
   /** 直式照片用 3:4；頭像用 1:1 */
   aspect?: '1:1' | '3:4';
@@ -73,18 +73,33 @@ export async function generateImage(
   }
 
   if (llm.provider === 'openai' || llm.provider === 'openai-compatible') {
-    const res = await requestJson<{ data?: { b64_json?: string; url?: string }[] }>(fetchFn, `${base}/images/generations`, {
-      headers: llm.apiKey ? { authorization: `Bearer ${llm.apiKey}` } : {},
-      body: {
-        model: llm.model,
-        prompt,
-        n: 1,
-        size: aspect === '1:1' ? '1024x1024' : /^dall-e-3/.test(llm.model) ? '1024x1792' : /^gpt-image/.test(llm.model) ? '1024x1536' : '1024x1024',
-        // dall-e 預設回網址；gpt-image 系列只回 base64
-        ...(/^dall-e/.test(llm.model) ? { response_format: 'b64_json' } : {}),
-      },
-      signal,
-    });
+    const headers: Record<string, string> = llm.apiKey ? { authorization: `Bearer ${llm.apiKey}` } : {};
+    const size =
+      aspect === '1:1' ? '1024x1024' : /^dall-e-3/.test(llm.model) ? '1024x1792' : /^gpt-image/.test(llm.model) ? '1024x1536' : '1024x1024';
+    type ImagesResponse = { data?: { b64_json?: string; url?: string }[] };
+    let res: ImagesResponse;
+    if (opts.reference && /^gpt-image/.test(llm.model)) {
+      // 有參考圖：gpt-image 走 /images/edits（multipart）
+      const form = new FormData();
+      form.append('model', llm.model);
+      form.append('prompt', prompt);
+      form.append('size', size);
+      form.append('image', new Blob([new Uint8Array(opts.reference.data)], { type: opts.reference.mime }), `reference.${opts.reference.mime.split('/')[1]}`);
+      res = await requestJson<ImagesResponse>(fetchFn, `${base}/images/edits`, { headers, body: form, signal });
+    } else {
+      res = await requestJson<ImagesResponse>(fetchFn, `${base}/images/generations`, {
+        headers,
+        body: {
+          model: llm.model,
+          prompt,
+          n: 1,
+          size,
+          // dall-e 預設回網址；gpt-image 系列只回 base64
+          ...(/^dall-e/.test(llm.model) ? { response_format: 'b64_json' } : {}),
+        },
+        signal,
+      });
+    }
     const d = res.data?.[0];
     if (d?.b64_json) return { data: Buffer.from(d.b64_json, 'base64'), mime: 'image/png' };
     if (d?.url) {

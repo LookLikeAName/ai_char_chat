@@ -36,6 +36,7 @@ import { applyInteraction, getMood, getRelationship, setMood } from '../relation
 import { callWithBinding } from '../services/llmCall.ts';
 import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
+import { avatarPhoto } from '../services/avatars.ts';
 import { photosRemaining, takePhoto } from '../services/photos.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
@@ -771,7 +772,7 @@ export class ReplyEngine {
       settings,
       history,
       images,
-      photos: photosLeft === null ? null : { remaining: photosLeft },
+      photos: photosLeft === null ? null : { remaining: photosLeft, appears: avatarPhoto(ctx.avatar).appears, proxy: avatarPhoto(ctx.avatar).proxy },
       now,
     });
     // 最後一則不是別人說的話時（主動發話、群組裡自己剛說過），補一個提示回合（Anthropic、Gemini 要求最後是 user）

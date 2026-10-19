@@ -6,8 +6,10 @@ import {
   IMAGE_STYLE_LABELS,
   isPersonaEmpty,
   missingFields,
+  DEFAULT_AVATAR_PHOTO,
   type AvatarDto,
   type AvatarInput,
+  type AvatarPhoto,
   type ImageStyle,
   type InitialStage,
   type LlmBinding,
@@ -17,6 +19,7 @@ import {
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
+import { PhotoSettingsCard } from '../../components/PhotoSettingsCard.tsx';
 import { ExportDialog } from '../../components/TransferDialogs.tsx';
 import { PersonaEditor, type PersonaState } from '../../components/persona/PersonaEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
@@ -44,6 +47,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   const [llm, setLlm] = useState<LlmBinding | null>(avatar?.llm ?? null);
   const [initialStage, setInitialStage] = useState<InitialStage>('stranger');
   const [exporting, setExporting] = useState(false);
+  const [photo, setPhoto] = useState<AvatarPhoto>(avatar?.photo ?? DEFAULT_AVATAR_PHOTO);
   const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
 
   const empty = isPersonaEmpty(p.persona);
@@ -54,6 +58,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
       p.bio !== avatar.bio ||
       !deepEqual(llm, avatar.llm) ||
       tokenLimit !== avatar.dailyTokenLimit ||
+      !deepEqual(photo, avatar.photo) ||
       !deepEqual(p.persona, avatar.persona) ||
       !deepEqual([...p.locks].sort(), [...avatar.personaLocks].sort()));
 
@@ -93,6 +98,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
             persona: p.persona,
             personaLocks: p.locks,
             dailyTokenLimit: tokenLimit,
+            photo,
             ...(avatar ? {} : { initialStage }),
           });
         }
@@ -161,6 +167,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
             )}
           </section>
           <AvatarImageCard avatar={avatar} state={p} />
+          <PhotoSettingsCard avatar={avatar} value={photo} onChange={setPhoto} />
         </>
       )}
 

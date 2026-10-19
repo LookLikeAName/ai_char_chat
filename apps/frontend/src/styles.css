@@ -89,7 +89,7 @@ textarea {
   color: inherit;
 }
 
-input:not([type='checkbox']):not([type='range']),
+input:not([type='checkbox']):not([type='range']):not(:where([type='radio'])),
 select,
 textarea {
   width: 100%;
@@ -118,6 +118,7 @@ textarea {
 }
 
 input[type='checkbox'],
+input[type='radio'],
 input[type='range'] {
   accent-color: var(--accent);
 }
@@ -3144,4 +3145,40 @@ fieldset.field {
   border-radius: 6px;
   background: var(--hover);
   font-size: 12px;
+}
+
+.radio-group {
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.radio-group input:not([type='radio']) {
+  margin-left: 26px;
+  width: calc(100% - 26px);
+}
+
+.reference-thumb {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex: none;
+}
+
+.reference-thumb.empty {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.photo-sample {
+  display: block;
+  max-width: 240px;
+  margin-top: 8px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
 }

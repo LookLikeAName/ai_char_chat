@@ -17,6 +17,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type {
   AllAnswers,
+  AvatarPhoto,
   EventCategory,
   EventLevel,
   TraceDto,
@@ -104,6 +105,10 @@ export const avatars = pgTable('avatars', {
   llm: jsonb('llm').$type<LlmBinding | null>(),
   /** 每天最多用多少 tokens（0 = 不限） */
   dailyTokenLimit: integer('daily_token_limit').notNull().default(0),
+  /** 傳照片的方式（AvatarPhoto）；空物件表示都用預設值 */
+  photo: jsonb('photo').$type<Partial<AvatarPhoto>>().notNull().default({}),
+  /** 另外上傳的照片參考圖 */
+  photoReferencePath: text('photo_reference_path'),
   ...timestamps,
 });
 

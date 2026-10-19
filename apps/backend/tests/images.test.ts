@@ -175,6 +175,105 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
     expect(JSON.parse(own.content)).toEqual({ messages: ['你看'], photo: '吧檯上剛拉好花的拿鐵' });
   });
 
+  describe('每個 avatar 自己的照片設定', () => {
+    const useImageModel = (profileId: string, model: string) =>
+      saveSettings(db, appSettingsSchema.parse({ replyPacing: 'instant', imageGen: { profileId, model } }));
+    const askPhoto = async () => {
+      reply = () => JSON.stringify({ messages: ['給你看'], photo: '窗邊的玩偶' });
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '在幹嘛' });
+      await engine().handle(conversationId);
+    };
+    beforeEach(async () => {
+      writeFileSync(path.join(mediaDir, 'avatars', 'face.png'), fakePng(256, 256));
+      writeFileSync(path.join(mediaDir, 'avatars', 'doll.png'), fakePng(64, 64));
+      await db.update(avatars).set({ imagePath: 'avatars/face.png', photoReferencePath: 'avatars/doll.png' }).where(eq(avatars.id, avatarId));
+      await useImageModel(imageProfile, 'gemini-image');
+    });
+
+    it('參考圖用另外上傳的那張、代替自己入鏡的是娃娃', async () => {
+      await db
+        .update(avatars)
+        .set({ photo: { appears: 'proxy', proxy: '白色兔子玩偶', reference: 'custom' } })
+        .where(eq(avatars.id, avatarId));
+      await askPhoto();
+      expect(chatBodies[0]!.body.messages[0].content).toContain('會改拍白色兔子玩偶');
+      const parts = imageBodies[0].contents[0].parts;
+      expect(parts[0].inlineData.data).toBe(fakePng(64, 64).toString('base64'));
+      expect(parts[1].text).toContain('白色兔子玩偶，外觀要和參考圖裡的一樣');
+    });
+
+    it('不用參考圖：只送文字', async () => {
+      await db.update(avatars).set({ photo: { reference: 'none' } }).where(eq(avatars.id, avatarId));
+      await askPhoto();
+      expect(imageBodies[0].contents[0].parts).toHaveLength(1);
+    });
+
+    it('這個 avatar 關掉照片：prompt 不提、填了也不生成', async () => {
+      await db.update(avatars).set({ photo: { enabled: false } }).where(eq(avatars.id, avatarId));
+      await askPhoto();
+      expect(chatBodies[0]!.body.messages[0].content).not.toContain('"photo"');
+      expect(imageBodies).toHaveLength(0);
+    });
+
+    it('gpt-image 有參考圖時走 /images/edits；Imagen 不支援參考圖就照常生成', async () => {
+      const [openai] = await db
+        .insert(llmProfiles)
+        .values({ name: 'oa', provider: 'openai', baseUrl: 'http://oa.test/v1', model: 'gpt-4o' })
+        .returning();
+      const calls: { url: string; body: BodyInit | null | undefined }[] = [];
+      const png = fakePng(1024, 1536).toString('base64');
+      const imgFetch = (async (u: string, init: RequestInit) => {
+        calls.push({ url: u, body: init.body });
+        return new Response(JSON.stringify({ data: [{ b64_json: png }], predictions: [{ bytesBase64Encoded: png, mimeType: 'image/png' }] }));
+      }) as unknown as FetchFn;
+      const { takePhoto } = await import('../src/services/photos.ts');
+      const [row] = await db.select().from(avatars).where(eq(avatars.id, avatarId));
+      const settings = appSettingsSchema.parse({ imageGen: { profileId: openai!.id, model: 'gpt-image-1' } });
+      await takePhoto({ db, box, mediaDir, fetchFn: imgFetch }, settings, row!, '自拍');
+      expect(calls[0]!.url).toBe('http://oa.test/v1/images/edits');
+      const form = calls[0]!.body as FormData;
+      expect(form.get('model')).toBe('gpt-image-1');
+      expect(form.get('size')).toBe('1024x1536');
+      expect((form.get('image') as Blob).size).toBe(33);
+
+      const imagen = appSettingsSchema.parse({ imageGen: { profileId: imageProfile, model: 'imagen-4.0-generate-001' } });
+      await takePhoto({ db, box, mediaDir, fetchFn: imgFetch }, imagen, row!, '自拍');
+      expect(calls[1]!.url).toContain(':predict');
+    });
+
+    it('API：上傳參考圖、用還沒儲存的設定試拍一張', async () => {
+      const form = new FormData();
+      form.append('file', new Blob([fakePng(80, 80)]), 'doll.png');
+      const body = new Response(form);
+      const up = await app.inject({
+        method: 'POST',
+        url: `/api/avatars/${avatarId}/photo-reference`,
+        headers: Object.fromEntries(body.headers),
+        payload: Buffer.from(await body.arrayBuffer()),
+      });
+      expect(up.statusCode).toBe(200);
+      expect(up.json().photoReferenceUrl).toMatch(/^\/media\/avatars\/.+-ref-.+\.png$/);
+      expect(existsSync(path.join(mediaDir, 'avatars', 'doll.png'))).toBe(false);
+
+      const test = await app.inject({
+        method: 'POST',
+        url: `/api/avatars/${avatarId}/photo/test`,
+        payload: { description: '窗邊的玩偶', photo: { enabled: true, appears: 'none', proxy: '', reference: 'none', style: 'anime' } },
+      });
+      expect(test.statusCode).toBe(200);
+      expect(test.json().url).toMatch(/^\/media\/photos\//);
+      const prompt = imageBodies.at(-1).contents[0].parts;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0].text).toContain('日系動漫');
+      // 試拍不會改到已儲存的設定
+      const [row] = await db.select().from(avatars).where(eq(avatars.id, avatarId));
+      expect(row!.photo).toEqual({});
+
+      const del = await app.inject({ method: 'DELETE', url: `/api/avatars/${avatarId}/photo-reference` });
+      expect(del.json().photoReferenceUrl).toBeNull();
+    });
+  });
+
   it('沒有設定圖片模型：prompt 不提照片', async () => {
     await db.insert(messages).values({ conversationId, senderType: 'user', content: '嗨' });
     await engine().handle(conversationId);

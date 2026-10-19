@@ -6,7 +6,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { avatarImageGenerateSchema, avatarInputSchema, personaCheckSchema, personaGenerateSchema } from '@acc/shared';
+import { avatarImageGenerateSchema, avatarInputSchema, personaCheckSchema, personaGenerateSchema, photoTestSchema } from '@acc/shared';
 import { avatars, conversationMembers, conversations } from '../db/schema.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError, notFound, parseBody } from '../errors.ts';
@@ -14,7 +14,9 @@ import { generateImage } from '../images/generate.ts';
 import { LlmError } from '../llm/index.ts';
 import { checkPersona } from '../persona/check.ts';
 import { generatePersona } from '../persona/generate.ts';
-import { avatarToDto, validatePersona } from '../services/avatars.ts';
+import { inspectImage } from '../images/inspect.ts';
+import { avatarToDto, mediaUrl, validatePersona } from '../services/avatars.ts';
+import { takePhoto } from '../services/photos.ts';
 import { assertProfileExists, getProfile, resolveRow } from '../services/llmProfiles.ts';
 import { getRelationship } from '../relationship/service.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -82,6 +84,7 @@ export async function avatarRoutes(app: FastifyInstance) {
           persona,
           personaLocks: input.personaLocks ?? [],
           dailyTokenLimit: input.dailyTokenLimit ?? 0,
+          ...(input.photo ? { photo: input.photo } : {}),
         })
         .returning();
       const [c] = await tx.insert(conversations).values({ type: 'dm' }).returning();
@@ -108,6 +111,7 @@ export async function avatarRoutes(app: FastifyInstance) {
         ...(persona !== undefined ? { persona } : {}),
         ...(input.personaLocks !== undefined ? { personaLocks: input.personaLocks } : {}),
         ...(input.dailyTokenLimit !== undefined ? { dailyTokenLimit: input.dailyTokenLimit } : {}),
+        ...(input.photo ? { photo: input.photo } : {}),
         updatedAt: new Date(),
       })
       .where(eq(avatars.id, id))
@@ -124,9 +128,58 @@ export async function avatarRoutes(app: FastifyInstance) {
       if (dmId) await tx.delete(conversations).where(eq(conversations.id, dmId));
       await tx.delete(avatars).where(eq(avatars.id, id));
     });
-    if (row.imagePath) await rm(path.join(mediaDir, row.imagePath), { force: true });
+    for (const file of [row.imagePath, row.photoReferencePath]) if (file) await rm(path.join(mediaDir, file), { force: true });
     await changed();
     return reply.status(204).send();
+  });
+
+  /** 照片的參考圖（例如本人的照片、常拿來拍照的娃娃）：只用在 avatar 傳的照片，不會當頭像 */
+  app.post('/avatars/:id/photo-reference', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    const row = await load(id);
+    const file = await req.file();
+    if (!file) throw new HttpError(400, '沒有收到檔案');
+    const buf = await file.toBuffer().catch((err: { code?: string }) => {
+      throw err.code === 'FST_REQ_FILE_TOO_LARGE' ? new HttpError(413, '圖片不能超過 5 MB') : err;
+    });
+    const info = inspectImage(buf);
+    if (!info) throw new HttpError(400, '只接受 PNG、JPEG、WebP、GIF');
+    const rel = `avatars/${row.id}-ref-${randomUUID().slice(0, 8)}.${info.ext}`;
+    await writeFile(path.join(mediaDir, rel), buf);
+    const [updated] = await db.update(avatars).set({ photoReferencePath: rel, updatedAt: new Date() }).where(eq(avatars.id, id)).returning();
+    if (row.photoReferencePath) await rm(path.join(mediaDir, row.photoReferencePath), { force: true });
+    await changed();
+    return dto(updated!);
+  });
+
+  app.delete('/avatars/:id/photo-reference', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    const row = await load(id);
+    const [updated] = await db.update(avatars).set({ photoReferencePath: null, updatedAt: new Date() }).where(eq(avatars.id, id)).returning();
+    if (row.photoReferencePath) await rm(path.join(mediaDir, row.photoReferencePath), { force: true });
+    await changed();
+    return dto(updated!);
+  });
+
+  /** 試拍一張，看看設定的效果（可以帶還沒儲存的設定）；照片不會傳到聊天裡，一天後自動刪除 */
+  app.post('/avatars/:id/photo/test', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    const { description, photo } = parseBody(photoTestSchema, req.body);
+    const row = await load(id);
+    const settings = await loadSettings(db);
+    if (!settings.imageGen) throw new HttpError(400, '請先到「設定 → 一般 → 頭像與照片生成」選擇圖片模型');
+    try {
+      const image = await takePhoto(
+        { db, box: app.deps.box, mediaDir, fetchFn: app.deps.fetchFn },
+        settings,
+        { ...row, ...(photo ? { photo } : {}) },
+        description,
+      );
+      return { url: mediaUrl(image.path), width: image.width, height: image.height };
+    } catch (err) {
+      if (err instanceof LlmError) throw new HttpError(502, `圖片生成失敗：${err.message}`);
+      throw err;
+    }
   });
 
   /** 存成新檔、更新 avatar、刪掉舊檔 */
