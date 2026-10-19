@@ -41,7 +41,7 @@ export const MODEL_SUGGESTIONS: Record<ProfileKind, Partial<Record<ProviderType,
     openai: ['gpt-image-1', 'dall-e-3'],
   },
   embedding: {
-    google: ['gemini-embedding-001'],
+    google: ['gemini-embedding-2', 'gemini-embedding-001'],
     openai: ['text-embedding-3-small', 'text-embedding-3-large'],
   },
 };

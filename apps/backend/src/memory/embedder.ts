@@ -12,6 +12,20 @@ export interface Embedder {
   embed(texts: string[], purpose: 'document' | 'query'): Promise<number[][]>;
 }
 
+/**
+ * Gemini 嵌入模型的「查詢／文件」怎麼表示：
+ * - gemini-embedding-001 用 taskType 參數
+ * - gemini-embedding-2 以後不看 taskType（會靜靜忽略），要把任務寫在文字前面
+ */
+export function geminiEmbedRequest(model: string, text: string, purpose: 'document' | 'query') {
+  const usesTaskType = /^(models\/)?(gemini-embedding-001|text-embedding-|embedding-)/.test(model);
+  if (usesTaskType) {
+    return { content: { parts: [{ text }] }, taskType: purpose === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT' };
+  }
+  const prefixed = purpose === 'query' ? `task: search result | query: ${text}` : `title: none | text: ${text}`;
+  return { content: { parts: [{ text: prefixed }] } };
+}
+
 function normalize(v: number[]): number[] {
   const n = Math.hypot(...v);
   return n ? v.map((x) => x / n) : v;
@@ -36,12 +50,7 @@ export class ApiEmbedder implements Embedder {
       const res = await requestJson<{ embeddings?: { values: number[] }[] }>(this.fetchFn, `${base}/${model}:batchEmbedContents`, {
         headers: this.llm.apiKey ? { 'x-goog-api-key': this.llm.apiKey } : {},
         body: {
-          requests: texts.map((text) => ({
-            model,
-            content: { parts: [{ text }] },
-            taskType: purpose === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT',
-            outputDimensionality: EMBEDDING_DIMS,
-          })),
+          requests: texts.map((text) => ({ model, ...geminiEmbedRequest(model, text, purpose), outputDimensionality: EMBEDDING_DIMS })),
         },
       });
       vectors = (res.embeddings ?? []).map((e) => e.values);

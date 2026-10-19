@@ -110,6 +110,21 @@ describe('ApiEmbedder', () => {
     expect(calls[0]!.body.requests[0]).toMatchObject({ taskType: 'RETRIEVAL_QUERY', outputDimensionality: 768 });
   });
 
+  it('gemini-embedding-2：不送 taskType（會被忽略），把查詢／文件寫在文字前面', async () => {
+    const { fetchFn, calls } = fake({ embeddings: [{ values: vec(1) }, { values: vec(2) }] });
+    const e = new ApiEmbedder({ provider: 'google', baseUrl: 'https://g.test/v1beta', model: 'gemini-embedding-2', apiKey: 'k' }, fetchFn);
+    await e.embed(['對方在準備面試', '他養了貓'], 'document');
+    await e.embed(['面試'], 'query').catch(() => {});
+    const [doc] = calls[0]!.body.requests;
+    expect(doc).toEqual({
+      model: 'models/gemini-embedding-2',
+      content: { parts: [{ text: 'title: none | text: 對方在準備面試' }] },
+      outputDimensionality: 768,
+    });
+    expect(calls[1]!.body.requests[0].content.parts[0].text).toBe('task: search result | query: 面試');
+    expect(calls[1]!.body.requests[0]).not.toHaveProperty('taskType');
+  });
+
   it('OpenAI 相容：依 index 排序，維度不符時報錯', async () => {
     const { fetchFn, calls } = fake({ data: [{ index: 1, embedding: vec(1) }, { index: 0, embedding: vec(2) }] });
     const e = new ApiEmbedder({ provider: 'openai-compatible', baseUrl: 'http://x/v1', model: 'm' }, fetchFn);
