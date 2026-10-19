@@ -59,6 +59,14 @@ describe.skipIf(!url)('匯出／匯入', () => {
       { conversationId: source.dmConversationId, senderType: 'user', content: '嗨', createdAt: new Date('2026-10-01T10:00:00Z') },
       { conversationId: source.dmConversationId, senderType: 'avatar', senderAvatarId: source.id, content: '嗨嗨', createdAt: new Date('2026-10-01T10:00:05Z') },
       { conversationId: source.dmConversationId, senderType: 'system', content: '系統訊息', createdAt: new Date('2026-10-01T10:00:06Z') },
+      {
+        conversationId: source.dmConversationId,
+        senderType: 'avatar',
+        senderAvatarId: source.id,
+        content: '',
+        meta: { image: { path: 'photos/x.png', mime: 'image/png', width: 1, height: 1, description: '一杯拿鐵' } },
+        createdAt: new Date('2026-10-01T10:00:07Z'),
+      },
     ]);
     await addMemories(db, null, [
       { avatarId: source.id, kind: 'event', content: '對方在準備面試', importance: 8 },
@@ -93,7 +101,8 @@ describe.skipIf(!url)('匯出／匯入', () => {
     const file = await exportOne('?memories=true&history=true');
     const [card] = file.avatars;
     expect(card!.memories!.map((m) => m.content)).toEqual(['對方在準備面試']);
-    expect(card!.messages!.map((m) => m.content)).toEqual(['嗨', '嗨嗨']);
+    // 圖片不匯出，變成文字標記
+    expect(card!.messages!.map((m) => m.content)).toEqual(['嗨', '嗨嗨', '［照片：一杯拿鐵］']);
     expect(card!.relationship!.stage).toBe('friend');
 
     const res = await app.inject({
@@ -103,7 +112,7 @@ describe.skipIf(!url)('匯出／匯入', () => {
     });
     expect(res.statusCode).toBe(200);
     const { avatars: [imported] } = res.json() as ImportResultDto;
-    expect(imported).toMatchObject({ name: '小雨', memories: 1, messages: 2 });
+    expect(imported).toMatchObject({ name: '小雨', memories: 1, messages: 3 });
     expect(imported!.id).not.toBe(source.id);
 
     const [row] = await db.select().from(avatars).where(eq(avatars.id, imported!.id));
@@ -117,9 +126,10 @@ describe.skipIf(!url)('匯出／匯入', () => {
     expect(msgs.map((m) => [m.senderType, m.content, m.senderAvatarId === imported!.id])).toEqual([
       ['user', '嗨', false],
       ['avatar', '嗨嗨', true],
+      ['avatar', '［照片：一杯拿鐵］', true],
     ]);
     const [member] = await db.select().from(conversationMembers).where(eq(conversationMembers.conversationId, imported!.dmConversationId));
-    expect(member!.handledUpTo?.toISOString()).toBe('2026-10-01T10:00:05.000Z');
+    expect(member!.handledUpTo?.toISOString()).toBe('2026-10-01T10:00:07.000Z');
     const convs = (await app.inject({ method: 'GET', url: '/api/conversations' })).json();
     expect(convs.find((c: { id: string }) => c.id === imported!.dmConversationId).unreadCount).toBe(0);
   });

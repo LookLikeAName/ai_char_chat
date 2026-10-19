@@ -87,17 +87,22 @@ export async function transferRoutes(app: FastifyInstance) {
       const dm = await dmOf(row.id);
       const rows = dm
         ? await db
-            .select({ sender: messages.senderType, content: messages.content, createdAt: messages.createdAt })
+            .select({ sender: messages.senderType, content: messages.content, createdAt: messages.createdAt, meta: messages.meta })
             .from(messages)
             .where(and(eq(messages.conversationId, dm), inArray(messages.senderType, ['user', 'avatar'])))
             .orderBy(desc(messages.createdAt), desc(messages.seq))
             .limit(TRANSFER_MAX_MESSAGES)
         : [];
-      out.messages = rows.reverse().map((m) => ({
-        sender: m.sender as 'user' | 'avatar',
-        content: m.content,
-        createdAt: m.createdAt.toISOString(),
-      }));
+      // 圖片不匯出，用文字標記（也保留它的描述，avatar 之後還記得傳過什麼）
+      const text = (m: (typeof rows)[number]) => {
+        const img = m.meta.image;
+        const tag = img ? `［${m.sender === 'avatar' ? '照片' : '圖片'}${img.description || img.caption ? `：${img.description ?? img.caption}` : ''}］` : '';
+        return [tag, m.content].filter(Boolean).join(' ').slice(0, 4000);
+      };
+      out.messages = rows
+        .reverse()
+        .map((m) => ({ sender: m.sender as 'user' | 'avatar', content: text(m), createdAt: m.createdAt.toISOString() }))
+        .filter((m) => m.content);
     }
     return out;
   }
