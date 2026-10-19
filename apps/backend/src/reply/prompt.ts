@@ -1,7 +1,17 @@
 // 組出一對一回覆的 prompt。順序：角色設定（固定，利於快取）→ 規則 → 現在的情境 → 對話紀錄。
-import { currentBlock, ENUM_OPTIONS, personaSchema, type AppSettings, type Persona, type PersonaDraft } from '@acc/shared';
+import {
+  currentBlock,
+  ENUM_OPTIONS,
+  personaSchema,
+  type AppSettings,
+  type AssessmentResults,
+  type Persona,
+  type PersonaDraft,
+  type Preferences,
+} from '@acc/shared';
 import type { ChatMessage } from '../llm/index.ts';
 import { renderPersona } from '../persona/describe.ts';
+import { describePreferences, describeResults } from '../profile/describe.ts';
 
 export interface PromptAvatar {
   name: string;
@@ -15,8 +25,16 @@ export interface HistoryMessage {
   createdAt: Date;
 }
 
+/** 玩家的 profile；還沒填偏好問卷時為 null */
+export interface PromptUser {
+  preferences: Preferences;
+  summary: string;
+  results: AssessmentResults;
+}
+
 export interface ReplyPromptInput {
   avatar: PromptAvatar;
+  user?: PromptUser | null;
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
@@ -70,7 +88,7 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history } = input;
+  const { avatar, settings, now, history, user } = input;
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
   let i = history.length - 1;
@@ -95,12 +113,12 @@ ${avatar.bio || '（沒有額外描述）'}
 ${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
 ${relationship}
-
+${user ? `\n${userSection(user)}\n` : ''}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
 - 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
-- 不要捏造對方沒說過的事；不知道就問。
+- 不要捏造對方沒說過的事；不知道就問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
 - 除非你的設定另有指定，用繁體中文（台灣用語）。
 - ${content}
 
@@ -110,6 +128,20 @@ ${relationship}
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
 {"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]}`;
+}
+
+/**
+ * 關於玩家的參考資料。avatar 應該把這些當成相處下來的直覺，不能說出「測驗」「分析」之類的話。
+ */
+function userSection(user: PromptUser): string {
+  const prefs = describePreferences(user.preferences).filter((l) => !l.startsWith('希望被稱呼為'));
+  const body = user.summary.trim()
+    ? user.summary.trim()
+    : [...prefs, ...describeResults(user.results)].map((l) => `- ${l}`).join('\n');
+  return `對方的名字（希望被這樣稱呼）：${user.preferences.nickname}
+
+## 關於對方（你相處下來大概感覺得到的；不要提到測驗、分數或分析，也不要一次把知道的都講出來）
+${body}${user.summary.trim() && prefs.length ? `\n${prefs.map((l) => `- ${l}`).join('\n')}` : ''}`;
 }
 
 /**

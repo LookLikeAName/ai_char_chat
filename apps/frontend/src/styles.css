@@ -1677,3 +1677,490 @@ input[type='range'].unset {
     position: static;
   }
 }
+
+/* ---------- 第 4 階段：玩家 profile 與心理測驗 ---------- */
+
+:root {
+  /* 價值觀發散長條的兩端（已用 dataviz validator 檢查淺色與深色） */
+  --div-pos: #d94c72;
+  --div-neg: #4a78b5;
+  --div-mid: #c9c5c0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --div-pos: #d9577e;
+    --div-neg: #4f86d6;
+    --div-mid: #4a4650;
+  }
+}
+
+.onboarding .editor {
+  max-width: 760px;
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-2);
+  counter-increment: step;
+}
+
+.steps li::before {
+  content: counter(step);
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.steps li.past::before {
+  content: '✓';
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.steps li.current {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.steps li.current::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.intro h1 {
+  font-size: 22px;
+}
+
+.intro p,
+.intro ul {
+  margin: 0;
+}
+
+.intro ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.questionnaire {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.q-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.q-head h2 {
+  font-size: 18px;
+}
+
+.q-head p {
+  margin: 0;
+}
+
+.q-instructions {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 14px;
+}
+
+.q-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.q-items {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: q;
+}
+
+.q-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  counter-increment: q;
+}
+
+.q-text {
+  margin: 0;
+  font-size: 16px;
+}
+
+.q-text::before {
+  content: counter(q) '. ';
+  color: var(--text-2);
+}
+
+.q-item.done .q-text {
+  color: var(--text-2);
+}
+
+.likert {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  max-width: 460px;
+}
+
+.likert-opt {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.likert-opt:hover {
+  background: var(--hover);
+}
+
+.likert-dot {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 0.1s;
+}
+
+.likert-opt:hover .likert-dot {
+  border-color: var(--accent);
+}
+
+.likert-opt.selected .likert-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface);
+  transform: scale(1.1);
+}
+
+.likert-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: 460px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.likert-current {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.prefs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+fieldset.field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.chips-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-toggle {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.chip-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip-toggle.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chip-toggle:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.prefs-view {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.prefs-view dt {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.prefs-view dd {
+  margin: 0;
+}
+
+.summary-text {
+  margin: 0;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* 五大人格：單一系列長條，軌道是同一色相的淺色 */
+.bf-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bf-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.bf-value {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.bf-track {
+  height: 10px;
+  margin: 4px 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+
+.bf-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.bf-poles {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.bf-poles span:last-child {
+  text-align: right;
+}
+
+/* 依附：焦慮 × 逃避 */
+.att {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+
+.att-chart {
+  width: 240px;
+  max-width: 100%;
+  flex: none;
+}
+
+.att-bg {
+  fill: var(--surface-2);
+  stroke: var(--border);
+}
+
+.att-mid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.att-q {
+  fill: var(--text-2);
+  font-size: 11px;
+}
+
+.att-q.end {
+  text-anchor: end;
+}
+
+.val-note {
+  margin: 0 0 4px;
+}
+
+.att-axis {
+  fill: var(--text-2);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.att-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.att-text {
+  flex: 1;
+  min-width: 220px;
+}
+
+.att-text p {
+  margin: 0 0 6px;
+}
+
+.att-style {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* 價值觀：以個人平均為中線的發散長條 */
+.val-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.val-legend {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 110px;
+  padding-right: 44px;
+  font-size: 12px;
+}
+
+.val-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.val-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.val-rank {
+  width: 18px;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: right;
+}
+
+.val-track {
+  position: relative;
+  height: 14px;
+}
+
+.val-axis {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 50%;
+  width: 1px;
+  background: var(--div-mid);
+}
+
+.val-fill {
+  position: absolute;
+  top: 2px;
+  height: 10px;
+}
+
+.val-fill.pos {
+  border-radius: 0 4px 4px 0;
+  background: var(--div-pos);
+}
+
+.val-fill.neg {
+  border-radius: 4px 0 0 4px;
+  background: var(--div-neg);
+}
+
+.val-num {
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .prefs-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .val-row {
+    grid-template-columns: 84px minmax(0, 1fr) 36px;
+  }
+
+  .val-legend {
+    padding-left: 84px;
+    padding-right: 36px;
+  }
+
+  .val-label {
+    white-space: normal;
+  }
+}

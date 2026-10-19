@@ -16,6 +16,7 @@ import { avatars, conversationMembers, conversations, messages } from '../db/sch
 import type { EventPublisher } from '../events/bus.ts';
 import type { FetchFn } from '../llm/index.ts';
 import type { Lock } from '../lock.ts';
+import { loadProfile } from '../profile/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
 import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -149,8 +150,12 @@ export class ReplyEngine {
   private async generate(ctx: Ctx): Promise<ReplyOutput> {
     const settings: AppSettings = await loadSettings(this.deps.db);
     const history = await this.loadHistory(ctx.conversationId);
+    const profile = await loadProfile(this.deps.db);
     const { system, messages: chat } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
+      user: profile.preferences
+        ? { preferences: profile.preferences, summary: profile.summary, results: profile.results }
+        : null,
       settings,
       history,
       now: this.now(),

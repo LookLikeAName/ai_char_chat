@@ -86,6 +86,9 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
         case 'settings.changed':
           void qc.invalidateQueries({ queryKey: qk.settings });
           break;
+        case 'profile.changed':
+          void qc.invalidateQueries({ queryKey: qk.profile });
+          break;
         case 'hello':
           break;
       }

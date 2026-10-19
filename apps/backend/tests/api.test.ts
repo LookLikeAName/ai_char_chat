@@ -50,7 +50,7 @@ describe.skipIf(!url)('API', () => {
   });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate settings, llm_profiles, avatars, conversations, conversation_members, messages cascade`);
+    await db.execute(sql`truncate settings, llm_profiles, avatars, conversations, conversation_members, messages, user_profile cascade`);
     events.length = 0;
     jobs.length = 0;
     llmCalls.length = 0;
@@ -334,6 +334,62 @@ describe.skipIf(!url)('API', () => {
       expect(call.headers['x-goog-api-key']).toBe('gk-1234');
       expect(call.body.generationConfig.responseModalities).toEqual(['IMAGE']);
       expect((await app.inject({ url: res.json().imageUrl })).statusCode).toBe(200);
+    });
+  });
+
+  describe('玩家 profile', () => {
+    it('第一次使用時沒有偏好；稱呼必填', async () => {
+      const res = (await app.inject({ url: '/api/profile' })).json();
+      expect(res).toMatchObject({ preferences: null, answers: {}, summary: '', summaryStale: false });
+      expect(res.results).toEqual({ bigFive: null, attachment: null, values: null });
+      const bad = await app.inject({ method: 'PUT', url: '/api/profile/preferences', payload: { nickname: ' ' } });
+      expect(bad.statusCode).toBe(400);
+      const ok = await app.inject({
+        method: 'PUT',
+        url: '/api/profile/preferences',
+        payload: { nickname: '阿明', interests: ['爬山'], chatStyles: ['banter'] },
+      });
+      expect(ok.json().preferences).toMatchObject({ nickname: '阿明', interests: ['爬山'], chatStyles: ['banter'], romance: null });
+      expect(events).toContainEqual({ type: 'profile.changed' });
+    });
+
+    it('作答可以分段存、清除單題，答完自動計分', async () => {
+      await app.inject({
+        method: 'PATCH',
+        url: '/api/profile/answers',
+        payload: { instrument: 'attachment', answers: { ecr1: 7, ecr2: 7, bogus: 3, ecr3: 99 } },
+      });
+      let res = (await app.inject({ url: '/api/profile' })).json();
+      expect(res.answers.attachment).toEqual({ ecr1: 7, ecr2: 7 });
+      expect(res.results.attachment).toBeNull();
+      await app.inject({ method: 'PATCH', url: '/api/profile/answers', payload: { instrument: 'attachment', answers: { ecr2: null } } });
+      res = (await app.inject({ url: '/api/profile' })).json();
+      expect(res.answers.attachment).toEqual({ ecr1: 7 });
+      const rest = { ecr2: 7, ecr3: 7, ecr4: 7, ecr5: 1, ecr6: 1, ecr7: 6, ecr8: 6, ecr9: 6 };
+      res = (
+        await app.inject({ method: 'PATCH', url: '/api/profile/answers', payload: { instrument: 'attachment', answers: rest } })
+      ).json();
+      expect(res.results.attachment).toEqual({ anxiety: 6, avoidance: 1, style: 'anxious' });
+    });
+
+    it('摘要：需要偏好與系統工具模型；之後作答有變更就標示過期', async () => {
+      expect((await app.inject({ method: 'POST', url: '/api/profile/summary/generate' })).statusCode).toBe(400);
+      await app.inject({ method: 'PUT', url: '/api/profile/preferences', payload: { nickname: '阿明' } });
+      const noUtil = await app.inject({ method: 'POST', url: '/api/profile/summary/generate' });
+      expect(noUtil.json().error).toContain('系統工具模型');
+
+      const profile = await createProfile();
+      await app.inject({ method: 'PATCH', url: '/api/settings', payload: { utilityLlm: { profileId: profile.id, params: {} } } });
+      const gen = (await app.inject({ method: 'POST', url: '/api/profile/summary/generate' })).json();
+      expect(gen).toMatchObject({ summary: '我是測試模型', summaryStale: false });
+      const call = llmCalls.at(-1)!;
+      expect(call.body.response_format).toBeUndefined();
+      expect(call.body.messages.at(-1).content).toContain('希望被稱呼為：阿明');
+
+      await app.inject({ method: 'PATCH', url: '/api/profile/answers', payload: { instrument: 'bigFive', answers: { ipip1: 4 } } });
+      expect((await app.inject({ url: '/api/profile' })).json().summaryStale).toBe(true);
+      const edited = (await app.inject({ method: 'PUT', url: '/api/profile/summary', payload: { summary: '自己改的' } })).json();
+      expect(edited).toMatchObject({ summary: '自己改的', summaryStale: false });
     });
   });
 

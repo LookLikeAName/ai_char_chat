@@ -12,6 +12,7 @@ export async function callUtility(
   settings: AppSettings,
   req: { system: string; messages: ChatMessage[] },
   purpose: string,
+  opts: { json?: boolean } = {},
 ): Promise<string> {
   const binding = settings.utilityLlm;
   if (!binding) throw new HttpError(400, '請先到「設定 → 一般」選擇系統工具模型');
@@ -23,7 +24,7 @@ export async function callUtility(
     const res = await callWithBinding(
       ctx,
       { ...binding, params: { maxOutputTokens: MIN_OUTPUT_TOKENS, ...params } },
-      { ...req, json: true, timeoutMs: 180_000 },
+      { ...req, json: opts.json ?? true, timeoutMs: 180_000 },
       { purpose },
     );
     return res.text;

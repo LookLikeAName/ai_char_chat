@@ -67,7 +67,7 @@ describe.skipIf(!url)('ReplyEngine', () => {
   });
 
   beforeEach(async () => {
-    await db.execute(sql`truncate settings, llm_profiles, avatars, conversations, conversation_members, messages, usage_log cascade`);
+    await db.execute(sql`truncate settings, llm_profiles, avatars, conversations, conversation_members, messages, usage_log, user_profile cascade`);
     events.length = 0;
     lock = new MemoryLock();
     responses = [];

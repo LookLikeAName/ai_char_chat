@@ -11,7 +11,10 @@ import type {
   PersonaGenerateInput,
   PersonaGenerateResult,
   PersonaIssue,
+  Preferences,
+  ProfileDto,
   ProviderType,
+  InstrumentId,
 } from '@acc/shared';
 
 export class ApiError extends Error {
@@ -81,6 +84,13 @@ export const api = {
   checkPersona: (input: { name: string; bio: string; persona: unknown; locks: string[] }) =>
     request<{ issues: PersonaIssue[] }>('POST', '/api/avatars/persona/check', input),
 
+  profile: () => request<ProfileDto>('GET', '/api/profile'),
+  savePreferences: (p: Preferences) => request<ProfileDto>('PUT', '/api/profile/preferences', p),
+  patchAnswers: (instrument: InstrumentId, answers: Record<string, number | null>) =>
+    request<ProfileDto>('PATCH', '/api/profile/answers', { instrument, answers }),
+  setSummary: (summary: string) => request<ProfileDto>('PUT', '/api/profile/summary', { summary }),
+  generateSummary: () => request<ProfileDto>('POST', '/api/profile/summary/generate'),
+
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>
     request<{ messages: MessageDto[]; hasMore: boolean }>('GET', `/api/conversations/${conversationId}/messages?limit=100`),
@@ -93,6 +103,7 @@ export const api = {
 export const qk = {
   health: ['health'] as const,
   settings: ['settings'] as const,
+  profile: ['profile'] as const,
   llmProfiles: ['llmProfiles'] as const,
   avatars: ['avatars'] as const,
   conversations: ['conversations'] as const,

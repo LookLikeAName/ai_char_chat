@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import type { LlmBinding, LlmParams, PersonaDraft, ProviderType } from '@acc/shared';
+import type { AllAnswers, LlmBinding, LlmParams, PersonaDraft, Preferences, ProviderType } from '@acc/shared';
 
 export interface MessageMeta {
   /** avatar 這一輪回覆的內心想法（只存在第一則） */
@@ -112,3 +112,15 @@ export const usageLog = pgTable(
   },
   (t) => [index('usage_log_created_idx').on(t.createdAt)],
 );
+
+/** 玩家的 profile（單人使用，只有一列 id = 1） */
+export const userProfile = pgTable('user_profile', {
+  id: smallint('id').primaryKey(),
+  /** 偏好問卷；還沒填過時為 null */
+  preferences: jsonb('preferences').$type<Preferences | null>(),
+  answers: jsonb('answers').$type<AllAnswers>().notNull().default({}),
+  summary: text('summary').notNull().default(''),
+  summaryAt: timestamp('summary_at', { withTimezone: true, precision: 3 }),
+  /** 作答或偏好最後變更的時間，用來判斷摘要是否過期 */
+  inputsUpdatedAt: timestamp('inputs_updated_at', { withTimezone: true, precision: 3 }),
+});

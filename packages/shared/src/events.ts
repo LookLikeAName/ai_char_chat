@@ -13,7 +13,8 @@ export type ServerEvent =
   | { type: 'conversation.seen'; conversationId: string; avatarId: string; seenUpTo: string }
   | { type: 'avatars.changed' }
   | { type: 'llmProfiles.changed' }
-  | { type: 'settings.changed' };
+  | { type: 'settings.changed' }
+  | { type: 'profile.changed' };
 
 export interface HealthDto {
   ok: boolean;

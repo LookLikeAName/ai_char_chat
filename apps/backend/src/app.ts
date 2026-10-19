@@ -15,6 +15,7 @@ import { avatarRoutes } from './routes/avatars.ts';
 import { conversationRoutes } from './routes/conversations.ts';
 import { healthRoutes } from './routes/health.ts';
 import { llmProfileRoutes } from './routes/llmProfiles.ts';
+import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { WsHub } from './ws.ts';
 
@@ -65,6 +66,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(llmProfileRoutes);
       await api.register(avatarRoutes);
       await api.register(conversationRoutes);
+      await api.register(profileRoutes);
     },
     { prefix: '/api' },
   );

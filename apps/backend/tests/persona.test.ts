@@ -67,6 +67,38 @@ describe('回覆 prompt 使用完整人格', () => {
     expect(prompt).toContain('你現在大概在：顧店（忙碌）');
   });
 
+  it('帶入玩家的稱呼、摘要與不想談的話題，但不重複稱呼', () => {
+    const prompt = buildSystemPrompt({
+      avatar: { name: '小雨', bio: '咖啡店店長', persona: SAMPLE_PERSONA },
+      user: {
+        preferences: {
+          nickname: '阿明',
+          gender: '',
+          ageRange: '25-34',
+          lifeSituation: '工程師',
+          interests: ['爬山'],
+          chatStyles: ['banter'],
+          avoidTopics: ['前任'],
+          romance: 'slow',
+          attractedTo: '',
+          routine: '',
+          about: '',
+        },
+        summary: '這位玩家慢熱但很真誠。',
+        results: { bigFive: null, attachment: null, values: null },
+      },
+      settings: { timezone: 'Asia/Taipei', adultContent: false },
+      history: [],
+      now: new Date('2026-10-19T03:00:00Z'),
+    });
+    expect(prompt).toContain('對方的名字（希望被這樣稱呼）：阿明');
+    expect(prompt).toContain('這位玩家慢熱但很真誠。');
+    expect(prompt).toContain('- 興趣：爬山');
+    expect(prompt).toContain('對方不想談：前任');
+    expect(prompt).not.toContain('希望被稱呼為');
+    expect(prompt).toContain('不要提到測驗');
+  });
+
   it('人格不完整時只用簡介', () => {
     const prompt = buildSystemPrompt({
       avatar: { name: '小雨', bio: '咖啡店店長', persona: fullDraftExcept('basic.age') },
