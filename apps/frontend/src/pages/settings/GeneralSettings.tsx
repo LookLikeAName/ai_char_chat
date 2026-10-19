@@ -103,6 +103,19 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
+        <h2>聊天</h2>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.showInnerThoughts}
+            onChange={(e) => patch({ showInnerThoughts: e.target.checked })}
+          />
+          <span>顯示 avatar 的內心想法</span>
+        </label>
+        <p className="hint">在 avatar 訊息上方顯示它回覆時心裡在想什麼。偷看會少一點神秘感，但很適合用來調整角色設定。</p>
+      </section>
+
+      <section className="card">
         <h2>系統工具模型</h2>
         <p className="hint">負責補完 avatar 設定、整理記憶、產生生活日誌與測驗摘要。建議選便宜、快速的模型。</p>
         <LlmBindingEditor value={s.utilityLlm} onChange={(utilityLlm) => patch({ utilityLlm })} />

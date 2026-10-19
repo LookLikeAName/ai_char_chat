@@ -12,6 +12,8 @@ export const appSettingsSchema = z.object({
     .default({ enabled: true, start: '00:30', end: '08:00' }),
   /** 成人內容；開啟前前端要求確認已滿 18 歲 */
   adultContent: z.boolean().default(false),
+  /** 在聊天畫面顯示 avatar 的內心想法（偷看用，也方便調整角色） */
+  showInnerThoughts: z.boolean().default(false),
   /** 系統工具模型：補完設定、萃取記憶、生活日誌… */
   utilityLlm: llmBindingSchema.nullable().default(null),
   /** 全域每日 token 上限；0 表示不限 */

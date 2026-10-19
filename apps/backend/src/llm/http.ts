@@ -24,7 +24,10 @@ export async function requestJson<T>(
     const e = err as Error;
     if (e.name === 'TimeoutError') throw new LlmError('連線逾時');
     if (e.name === 'AbortError') throw e;
-    throw new LlmError(`無法連線：${e.message}`);
+    // fetch failed 本身沒什麼資訊，真正的原因（ENOTFOUND、ECONNREFUSED…）在 cause 裡
+    const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+    const detail = cause?.code ?? cause?.message;
+    throw new LlmError(`無法連線：${e.message}${detail ? `（${detail}）` : ''}`);
   }
   const text = await res.text();
   if (!res.ok) throw new LlmError(`供應商回應 ${res.status}：${errorMessage(text)}`, res.status);

@@ -6,6 +6,7 @@ import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { clockTime, dayLabel, sameDay, shortTime } from '../../lib/format.ts';
+import { useTyping } from '../../lib/serverEvents.tsx';
 import { errorText, useToast } from '../../lib/toast.tsx';
 
 export function ChatsPage() {
@@ -92,20 +93,38 @@ function Section({
       <h2 className="list-section">{title}</h2>
       {items.length === 0 && empty && <p className="hint pad">{empty}</p>}
       {items.map((c) => (
-        <Link key={c.id} to={`/chats/${c.id}`} className={`chat-item${c.id === selectedId ? ' active' : ''}`}>
-          <AvatarImage name={c.title} src={c.imageUrl} size={44} />
-          <span className="chat-item-body">
-            <span className="chat-item-top">
-              <span className="chat-item-title">{c.title}</span>
-              <span className="chat-item-time">{shortTime(c.lastMessageAt)}</span>
-            </span>
-            <span className="chat-item-preview">
-              {c.lastMessage ? `${c.lastMessage.senderType === 'user' ? '你：' : ''}${c.lastMessage.content}` : '還沒有訊息'}
-            </span>
-          </span>
-        </Link>
+        <ChatItem key={c.id} c={c} active={c.id === selectedId} />
       ))}
     </section>
+  );
+}
+
+function ChatItem({ c, active }: { c: ConversationDto; active: boolean }) {
+  const typing = useTyping(c.id).length > 0;
+  const unread = active ? 0 : c.unreadCount;
+  const preview = c.lastMessage
+    ? `${c.lastMessage.senderType === 'user' ? '你：' : ''}${c.lastMessage.content}`
+    : '還沒有訊息';
+  return (
+    <Link to={`/chats/${c.id}`} className={`chat-item${active ? ' active' : ''}`}>
+      <AvatarImage name={c.title} src={c.imageUrl} size={44} />
+      <span className="chat-item-body">
+        <span className="chat-item-top">
+          <span className="chat-item-title">{c.title}</span>
+          <span className="chat-item-time">{shortTime(c.lastMessageAt)}</span>
+        </span>
+        <span className="chat-item-bottom">
+          <span className={`chat-item-preview${typing ? ' typing-text' : ''}${unread ? ' unread-text' : ''}`}>
+            {typing ? '輸入中…' : preview}
+          </span>
+          {unread > 0 && (
+            <span className="badge" aria-label={`${unread} 則未讀`}>
+              {unread > 99 ? '99+' : unread}
+            </span>
+          )}
+        </span>
+      </span>
+    </Link>
   );
 }
 
@@ -123,14 +142,32 @@ function ChatView({
     queryKey: qk.messages(conversation.id),
     queryFn: () => api.messages(conversation.id),
   });
+  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
   const messages = data?.messages ?? [];
   const byId = useMemo(() => new Map(avatars.map((a) => [a.id, a])), [avatars]);
+  const typingIds = useTyping(conversation.id);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dmAvatar = conversation.type === 'dm' ? byId.get(conversation.memberAvatarIds[0] ?? '') : undefined;
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+  }, [messages.length, typingIds.length]);
+
+  // 正在看這個對話時，avatar 的新訊息直接算已讀
+  const unread = conversation.unreadCount;
+  useEffect(() => {
+    const markIfVisible = () => {
+      if (unread > 0 && document.visibilityState === 'visible') void api.markRead(conversation.id).catch(() => {});
+    };
+    markIfVisible();
+    document.addEventListener('visibilitychange', markIfVisible);
+    return () => document.removeEventListener('visibilitychange', markIfVisible);
+  }, [conversation.id, unread]);
+
+  // 只有最後一則非玩家訊息是錯誤時才提供重試
+  const lastNonUser = [...messages].reverse().find((m) => m.senderType !== 'user');
+  const retryId = lastNonUser?.systemKind === 'error' ? lastNonUser.id : null;
 
   return (
     <main className="chat-view">
@@ -141,8 +178,12 @@ function ChatView({
         <AvatarImage name={conversation.title} src={conversation.imageUrl} size={36} />
         <div className="chat-head-text">
           <h1>{conversation.title}</h1>
-          <span className="chat-head-sub">
-            {conversation.type === 'group' ? `${conversation.memberAvatarIds.length} 位成員` : '狀態功能在第 6 階段加入'}
+          <span className={`chat-head-sub${typingIds.length ? ' typing-text' : ''}`}>
+            {typingIds.length
+              ? '輸入中…'
+              : conversation.type === 'group'
+                ? `${conversation.memberAvatarIds.length} 位成員`
+                : (dmAvatar?.bio ?? '')}
           </span>
         </div>
         <button className="icon-btn" onClick={onToggleInfo} aria-label="顯示或隱藏資訊面板" title="資訊面板">
@@ -155,10 +196,24 @@ function ChatView({
         {!isLoading && messages.length === 0 && (
           <div className="messages-empty">
             <p>傳一則訊息打個招呼吧。</p>
-            <p className="hint">avatar 的回覆在第 2 階段加入；目前訊息會存起來並即時同步到其他分頁。</p>
+            {dmAvatar && !dmAvatar.llm && (
+              <p className="hint">
+                {dmAvatar.name} 還沒有綁定 LLM，<Link to={`/avatars/${dmAvatar.id}`}>先去設定大腦</Link>。
+              </p>
+            )}
           </div>
         )}
-        <MessageList messages={messages} byId={byId} />
+        <MessageList
+          messages={messages}
+          byId={byId}
+          seenUpTo={conversation.seenUpTo}
+          showThoughts={!!settings?.showInnerThoughts}
+          retryId={retryId}
+          onRetry={() => void api.retryReply(conversation.id)}
+        />
+        {typingIds.map((id) => (
+          <TypingBubble key={id} avatar={byId.get(id)} />
+        ))}
       </div>
 
       <Composer conversationId={conversation.id} />
@@ -166,7 +221,37 @@ function ChatView({
   );
 }
 
-function MessageList({ messages, byId }: { messages: MessageDto[]; byId: Map<string, AvatarDto> }) {
+function TypingBubble({ avatar }: { avatar?: AvatarDto }) {
+  return (
+    <div className="msg msg-theirs" aria-live="polite">
+      <span className="msg-avatar">
+        <AvatarImage name={avatar?.name ?? '?'} src={avatar?.imageUrl ?? null} size={32} />
+      </span>
+      <div className="msg-bubble typing-bubble" aria-label={`${avatar?.name ?? ''} 正在輸入`}>
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
+function MessageList({
+  messages,
+  byId,
+  seenUpTo,
+  showThoughts,
+  retryId,
+  onRetry,
+}: {
+  messages: MessageDto[];
+  byId: Map<string, AvatarDto>;
+  seenUpTo: string | null;
+  showThoughts: boolean;
+  retryId: string | null;
+  onRetry: () => void;
+}) {
+  const seenAt = seenUpTo ? Date.parse(seenUpTo) : 0;
   return (
     <>
       {messages.map((m, i) => {
@@ -184,7 +269,14 @@ function MessageList({ messages, byId }: { messages: MessageDto[]; byId: Map<str
           <div key={m.id}>
             {newDay && <div className="day-sep">{dayLabel(m.createdAt)}</div>}
             {m.senderType === 'system' ? (
-              <div className="system-msg">{m.content}</div>
+              <div className={`system-msg${m.systemKind === 'error' ? ' system-error' : ''}`}>
+                {m.content}
+                {m.id === retryId && (
+                  <button className="btn btn-small" onClick={onRetry}>
+                    重試
+                  </button>
+                )}
+              </div>
             ) : (
               <div className={`msg ${mine ? 'msg-mine' : 'msg-theirs'}${grouped ? ' msg-grouped' : ''}`}>
                 {!mine && (
@@ -192,10 +284,18 @@ function MessageList({ messages, byId }: { messages: MessageDto[]; byId: Map<str
                     {!grouped && <AvatarImage name={sender?.name ?? '?'} src={sender?.imageUrl ?? null} size={32} />}
                   </span>
                 )}
-                <div className="msg-bubble">{m.content}</div>
-                <time className="msg-time" dateTime={m.createdAt}>
-                  {clockTime(m.createdAt)}
-                </time>
+                <div className="msg-content">
+                  {showThoughts && m.innerThought && <div className="thought">💭 {m.innerThought}</div>}
+                  <div className="msg-line">
+                    <div className="msg-bubble">{m.content}</div>
+                    <span className="msg-meta">
+                      {mine && seenAt >= Date.parse(m.createdAt) && <span className="msg-seen">已讀</span>}
+                      <time className="msg-time" dateTime={m.createdAt}>
+                        {clockTime(m.createdAt)}
+                      </time>
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
           </div>

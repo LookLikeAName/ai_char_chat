@@ -1,29 +1,18 @@
 import type { FastifyInstance } from 'fastify';
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { sendMessageSchema, type ConversationDto, type MessageDto } from '@acc/shared';
+import { sendMessageSchema, type ConversationDto } from '@acc/shared';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
 import { notFound, parseBody } from '../errors.ts';
+import { debounceMs } from '../reply/timing.ts';
 import { mediaUrl } from '../services/avatars.ts';
+import { messageToDto, postMessage } from '../services/messages.ts';
 
 const idParams = z.object({ id: z.uuid() });
 const pageQuery = z.object({
   before: z.iso.datetime({ offset: true }).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
-
-type MessageRow = typeof messages.$inferSelect;
-
-export function messageToDto(m: MessageRow): MessageDto {
-  return {
-    id: m.id,
-    conversationId: m.conversationId,
-    senderType: m.senderType,
-    senderAvatarId: m.senderAvatarId,
-    content: m.content,
-    createdAt: m.createdAt.toISOString(),
-  };
-}
 
 export async function conversationRoutes(app: FastifyInstance) {
   const { db, events, jobs } = app.deps;
@@ -38,6 +27,7 @@ export async function conversationRoutes(app: FastifyInstance) {
         avatarId: avatars.id,
         name: avatars.name,
         imagePath: avatars.imagePath,
+        seenUpTo: conversationMembers.seenUpTo,
       })
       .from(conversationMembers)
       .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
@@ -47,8 +37,22 @@ export async function conversationRoutes(app: FastifyInstance) {
       .selectDistinctOn([messages.conversationId])
       .from(messages)
       .where(inArray(messages.conversationId, ids))
-      .orderBy(messages.conversationId, desc(messages.createdAt));
+      .orderBy(messages.conversationId, desc(messages.createdAt), desc(messages.seq));
     const lastBy = new Map(last.map((m) => [m.conversationId, m]));
+    // 未讀：玩家上次看過之後 avatar 傳來的訊息
+    const unread = await db
+      .select({ conversationId: messages.conversationId, n: count() })
+      .from(messages)
+      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+      .where(
+        and(
+          inArray(messages.conversationId, ids),
+          eq(messages.senderType, 'avatar'),
+          or(isNull(conversations.userReadAt), gt(messages.createdAt, conversations.userReadAt)),
+        ),
+      )
+      .groupBy(messages.conversationId);
+    const unreadBy = new Map(unread.map((u) => [u.conversationId, Number(u.n)]));
 
     return convs
       .map((c): ConversationDto => {
@@ -63,6 +67,8 @@ export async function conversationRoutes(app: FastifyInstance) {
           memberAvatarIds: mem.map((m) => m.avatarId),
           lastMessage: lastMsg ? messageToDto(lastMsg) : null,
           lastMessageAt: c.lastMessageAt?.toISOString() ?? null,
+          unreadCount: unreadBy.get(c.id) ?? 0,
+          seenUpTo: dmAvatar?.seenUpTo?.toISOString() ?? null,
         };
       })
       .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
@@ -76,7 +82,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       .select()
       .from(messages)
       .where(and(eq(messages.conversationId, id), before ? lt(messages.createdAt, new Date(before)) : undefined))
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.createdAt), desc(messages.seq))
       .limit(limit);
     return { messages: rows.reverse().map(messageToDto), hasMore: rows.length === limit };
   });
@@ -85,15 +91,31 @@ export async function conversationRoutes(app: FastifyInstance) {
     const { id } = parseBody(idParams, req.params);
     const { content } = parseBody(sendMessageSchema, req.body);
     await assertConversation(id);
-    const row = await db.transaction(async (tx) => {
-      const [m] = await tx.insert(messages).values({ conversationId: id, senderType: 'user', content }).returning();
-      await tx.update(conversations).set({ lastMessageAt: sql`now()` }).where(eq(conversations.id, id));
-      return m!;
-    });
-    const dto = messageToDto(row);
-    await events.publish({ type: 'message.created', message: dto });
-    await jobs.add({ kind: 'user-message', conversationId: id, messageId: row.id });
+    const dto = await postMessage(db, events, { conversationId: id, senderType: 'user', content });
+    // 延遲一下再處理：玩家連續傳的訊息會合併成一次回覆
+    await jobs.add({ kind: 'reply', conversationId: id }, { delayMs: debounceMs(Math.random) });
     return reply.status(201).send(dto);
+  });
+
+  /** 玩家看過這個對話（清除未讀） */
+  app.post('/conversations/:id/read', async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    await assertConversation(id);
+    await db.update(conversations).set({ userReadAt: new Date() }).where(eq(conversations.id, id));
+    await events.publish({ type: 'conversations.changed' });
+    return reply.status(204).send();
+  });
+
+  /** 回覆失敗後重試：移除錯誤訊息，重新投遞 */
+  app.post('/conversations/:id/retry', async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    await assertConversation(id);
+    await db
+      .delete(messages)
+      .where(and(eq(messages.conversationId, id), eq(messages.senderType, 'system'), sql`${messages.meta}->>'systemKind' = 'error'`));
+    await events.publish({ type: 'messages.changed', conversationId: id });
+    await jobs.add({ kind: 'reply', conversationId: id });
+    return reply.status(202).send();
   });
 
   async function assertConversation(id: string) {

@@ -5,7 +5,7 @@ import { loadConfig } from './config.ts';
 import { SecretBox } from './crypto.ts';
 import { createDb, runMigrations } from './db/client.ts';
 import { RedisEventPublisher, subscribeEvents } from './events/bus.ts';
-import { AGENT_QUEUE, type AgentJob, type JobQueue } from './jobs.ts';
+import { AGENT_QUEUE, REPLY_JOB_OPTIONS, type AgentJob, type JobQueue } from './jobs.ts';
 import { WsHub } from './ws.ts';
 
 const config = loadConfig();
@@ -17,8 +17,8 @@ const queue = new Queue<AgentJob>(AGENT_QUEUE, { connection: redis });
 const jobs: JobQueue = {
   async add(job, opts) {
     await queue.add(job.kind, job, {
+      ...REPLY_JOB_OPTIONS,
       delay: opts?.delayMs,
-      jobId: opts?.jobId,
       removeOnComplete: 1000,
       removeOnFail: 1000,
     });

@@ -9,7 +9,7 @@ import type { ServerEvent } from '@acc/shared';
 import { buildApp } from '../src/app.ts';
 import { SecretBox } from '../src/crypto.ts';
 import { createDb, runMigrations } from '../src/db/client.ts';
-import { llmProfiles } from '../src/db/schema.ts';
+import { llmProfiles, messages } from '../src/db/schema.ts';
 import type { AgentJob } from '../src/jobs.ts';
 import type { FetchFn } from '../src/llm/index.ts';
 import { WsHub } from '../src/ws.ts';
@@ -176,12 +176,39 @@ describe.skipIf(!url)('API', () => {
       const msg = sent.json();
       expect(msg).toMatchObject({ content: '你好', senderType: 'user' });
       expect(events).toContainEqual({ type: 'message.created', message: msg });
-      expect(jobs).toEqual([{ kind: 'user-message', conversationId: conv, messageId: msg.id }]);
+      expect(jobs).toEqual([{ kind: 'reply', conversationId: conv }]);
 
       const page = (await app.inject({ url: `/api/conversations/${conv}/messages` })).json();
       expect(page.messages.map((m: { content: string }) => m.content)).toEqual(['你好']);
       const convs = (await app.inject({ url: '/api/conversations' })).json();
       expect(convs[0].lastMessage.content).toBe('你好');
+    });
+
+    it('未讀數：avatar 的新訊息算未讀，標記已讀後歸零', async () => {
+      const avatar = (await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '阿哲' } })).json();
+      const conv = avatar.dmConversationId;
+      await db.insert(messages).values([
+        { conversationId: conv, senderType: 'avatar', senderAvatarId: avatar.id, content: '在嗎' },
+        { conversationId: conv, senderType: 'avatar', senderAvatarId: avatar.id, content: '？' },
+      ]);
+      expect((await app.inject({ url: '/api/conversations' })).json()[0].unreadCount).toBe(2);
+      expect((await app.inject({ method: 'POST', url: `/api/conversations/${conv}/read` })).statusCode).toBe(204);
+      expect((await app.inject({ url: '/api/conversations' })).json()[0].unreadCount).toBe(0);
+    });
+
+    it('重試：移除錯誤訊息並重新投遞回覆', async () => {
+      const avatar = (await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '阿哲' } })).json();
+      const conv = avatar.dmConversationId;
+      await db.insert(messages).values([
+        { conversationId: conv, senderType: 'user', content: '嗨' },
+        { conversationId: conv, senderType: 'system', content: '失敗', meta: { systemKind: 'error' } },
+        { conversationId: conv, senderType: 'system', content: '提示', meta: { systemKind: 'notice' } },
+      ]);
+      expect((await app.inject({ method: 'POST', url: `/api/conversations/${conv}/retry` })).statusCode).toBe(202);
+      const page = (await app.inject({ url: `/api/conversations/${conv}/messages` })).json();
+      expect(page.messages.map((m: { content: string }) => m.content)).toEqual(['嗨', '提示']);
+      expect(jobs).toEqual([{ kind: 'reply', conversationId: conv }]);
+      expect(events).toContainEqual({ type: 'messages.changed', conversationId: conv });
     });
 
     it('空白訊息被拒絕', async () => {

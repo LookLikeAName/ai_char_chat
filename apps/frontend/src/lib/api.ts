@@ -77,6 +77,8 @@ export const api = {
     request<{ messages: MessageDto[]; hasMore: boolean }>('GET', `/api/conversations/${conversationId}/messages?limit=100`),
   sendMessage: (conversationId: string, content: string) =>
     request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content }),
+  markRead: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/read`),
+  retryReply: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/retry`),
 };
 
 export const qk = {

@@ -5,6 +5,12 @@ export type ServerEvent =
   | { type: 'hello'; serverTime: string }
   | { type: 'message.created'; message: MessageDto }
   | { type: 'conversations.changed' }
+  /** 訊息被刪除或修改，需要重新載入 */
+  | { type: 'messages.changed'; conversationId: string }
+  /** avatar 正在輸入；typing = false 表示停止（送出或放棄） */
+  | { type: 'typing'; conversationId: string; avatarId: string; typing: boolean }
+  /** avatar 讀了玩家的訊息 */
+  | { type: 'conversation.seen'; conversationId: string; avatarId: string; seenUpTo: string }
   | { type: 'avatars.changed' }
   | { type: 'llmProfiles.changed' }
   | { type: 'settings.changed' };

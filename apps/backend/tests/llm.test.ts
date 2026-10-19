@@ -130,6 +130,15 @@ describe('OpenAI 與相容端點', () => {
     expect(calls[0]!.headers.authorization).toBeUndefined();
   });
 
+  it('連不上時帶上底層的錯誤代碼', async () => {
+    const fetchFn = (async () => {
+      throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } });
+    }) as unknown as FetchFn;
+    await expect(
+      complete({ provider: 'openai', baseUrl: 'https://o.example/v1', model: 'gpt-x' }, { messages, params: {} }, fetchFn),
+    ).rejects.toThrow('無法連線：fetch failed（ENOTFOUND）');
+  });
+
   it('錯誤回應轉成 LlmError 並帶上供應商訊息', async () => {
     const { fetchFn } = fakeFetch({ error: { message: 'Invalid API key' } }, 401);
     const err = await complete(
