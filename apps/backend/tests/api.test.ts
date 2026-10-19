@@ -310,7 +310,7 @@ describe.skipIf(!url)('API', () => {
         await app.inject({
           method: 'POST',
           url: '/api/llm-profiles',
-          payload: { name: 'g', provider: 'google', model: 'gemini-x', apiKey: 'gk-1234' },
+          payload: { kind: 'image', name: 'g', provider: 'google', model: 'gemini-image-x', apiKey: 'gk-1234' },
         })
       ).json();
       const avatar = (await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '小雨' } })).json();
@@ -324,7 +324,7 @@ describe.skipIf(!url)('API', () => {
       await app.inject({
         method: 'PATCH',
         url: '/api/settings',
-        payload: { imageGen: { profileId: profile.id, model: 'gemini-image-x' } },
+        payload: { imageGen: { profileId: profile.id } },
       });
       const res = await app.inject({ method: 'POST', url: `/api/avatars/${avatar.id}/image/generate`, payload: { prompt: '短髮女生' } });
       expect(res.statusCode).toBe(200);

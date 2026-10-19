@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm';
 import {
   defaultVision,
+  PROFILE_KIND_LABELS,
+  type ProfileKind,
   effectiveBaseUrl,
   resolveParams,
   type LlmBinding,
@@ -26,6 +28,7 @@ export function profileToDto(row: ProfileRow, usedBy: number): LlmProfileDto {
     hasApiKey: !!row.apiKeyEnc,
     apiKeyHint: row.apiKeyHint,
     defaults: row.defaults,
+    kind: row.kind,
     pricing: row.pricing ?? null,
     vision: row.vision ?? defaultVision(row.provider),
     visionSet: row.vision !== null,
@@ -51,8 +54,12 @@ export async function getProfile(db: Db, id: string): Promise<ProfileRow> {
   return row;
 }
 
-export async function assertProfileExists(db: Db, id: string): Promise<void> {
-  await getProfile(db, id);
+/** 確認設定檔存在；給了 kind 時也要是這個用途（例如 avatar 的大腦只能選聊天用的） */
+export async function assertProfileExists(db: Db, id: string, kind?: ProfileKind): Promise<void> {
+  const p = await getProfile(db, id);
+  if (kind && p.kind !== kind) {
+    throw new HttpError(400, `「${p.name}」是${PROFILE_KIND_LABELS[p.kind]}用的設定檔，這裡要選${PROFILE_KIND_LABELS[kind]}用的`);
+  }
 }
 
 export function resolveRow(row: ProfileRow, box: SecretBox): ResolvedLlm {

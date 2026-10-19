@@ -3,6 +3,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { migrateLegacyProfileSettings } from './legacy.ts';
 import * as schema from './schema.ts';
 
 export type Db = ReturnType<typeof createDb>['db'];
@@ -20,4 +21,5 @@ export function migrationsFolder(): string {
 
 export async function runMigrations(db: Db): Promise<void> {
   await migrate(db, { migrationsFolder: migrationsFolder() });
+  await migrateLegacyProfileSettings(db);
 }

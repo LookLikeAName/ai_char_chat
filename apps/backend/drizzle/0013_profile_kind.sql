@@ -1,0 +1,1 @@
+ALTER TABLE "llm_profiles" ADD COLUMN "kind" text DEFAULT 'chat' NOT NULL;

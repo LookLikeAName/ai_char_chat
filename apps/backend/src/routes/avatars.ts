@@ -71,7 +71,7 @@ export async function avatarRoutes(app: FastifyInstance) {
 
   app.post('/avatars', async (req, reply) => {
     const input = parseBody(avatarInputSchema, req.body);
-    if (input.llm) await assertProfileExists(db, input.llm.profileId);
+    if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona) ?? {};
     // 建立 avatar 時一起建立它的一對一聊天
     const row = await db.transaction(async (tx) => {
@@ -100,7 +100,7 @@ export async function avatarRoutes(app: FastifyInstance) {
     const { id } = parseBody(idParams, req.params);
     const input = parseBody(avatarInputSchema, req.body);
     await load(id);
-    if (input.llm) await assertProfileExists(db, input.llm.profileId);
+    if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona);
     const [row] = await db
       .update(avatars)
@@ -167,7 +167,7 @@ export async function avatarRoutes(app: FastifyInstance) {
     const { description, photo } = parseBody(photoTestSchema, req.body);
     const row = await load(id);
     const settings = await loadSettings(db);
-    if (!settings.imageGen) throw new HttpError(400, '請先到「設定 → 一般 → 頭像與照片生成」選擇圖片模型');
+    if (!settings.imageGen) throw new HttpError(400, '請先到「設定 → 一般 → 頭像與照片生成」選擇圖片生成的設定檔');
     try {
       const image = await takePhoto(
         { db, box: app.deps.box, mediaDir, fetchFn: app.deps.fetchFn },
@@ -225,9 +225,8 @@ export async function avatarRoutes(app: FastifyInstance) {
     const { prompt } = parseBody(avatarImageGenerateSchema, req.body);
     const row = await load(id);
     const settings = await loadSettings(db);
-    if (!settings.imageGen) throw new HttpError(400, '請先到「設定 → 一般 → 頭像生成」選擇圖片模型');
-    const profile = await getProfile(db, settings.imageGen.profileId);
-    const llm = { ...resolveRow(profile, app.deps.box), model: settings.imageGen.model };
+    if (!settings.imageGen) throw new HttpError(400, '請先到「設定 → 一般 → 頭像與照片生成」選擇圖片生成的設定檔');
+    const llm = resolveRow(await getProfile(db, settings.imageGen.profileId), app.deps.box);
     let image;
     try {
       image = await generateImage(llm, prompt, app.deps.fetchFn);

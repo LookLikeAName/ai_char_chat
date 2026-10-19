@@ -138,7 +138,7 @@ export async function transferRoutes(app: FastifyInstance) {
   /** 匯入：每個 avatar 都是新的（不會覆蓋同名的），各自有新的一對一聊天 */
   app.post('/avatars/import', { bodyLimit: IMPORT_BODY_LIMIT }, async (req): Promise<ImportResultDto> => {
     const { file: input, profileId, include } = parseBody(importRequestSchema, req.body);
-    if (profileId) await assertProfileExists(db, profileId);
+    if (profileId) await assertProfileExists(db, profileId, 'chat');
     // 先全部檢查過，有一個不合格就整批不匯入
     const prepared = input.avatars.map((c, i) => {
       try {

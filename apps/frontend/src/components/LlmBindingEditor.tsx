@@ -14,14 +14,16 @@ interface Props {
 }
 
 export function LlmBindingEditor({ value, onChange, allowNone = true }: Props) {
-  const { data: profiles = [], isLoading } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const { data: all = [], isLoading } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  // 大腦與系統工具模型只能選聊天用的設定檔
+  const profiles = all.filter((p) => p.kind === 'chat');
   const [test, setTest] = useState<LlmTestResult | { pending: true } | null>(null);
   const profile = profiles.find((p) => p.id === value?.profileId) ?? null;
 
   if (!isLoading && profiles.length === 0) {
     return (
       <p className="hint">
-        還沒有任何 LLM 設定檔。請先到 <Link to="/settings/llm">設定 → LLM 設定檔</Link> 新增一個。
+        還沒有聊天用的 LLM 設定檔。請先到 <Link to="/settings/llm?new=chat">設定 → LLM 設定檔</Link> 新增一個。
       </p>
     );
   }
@@ -91,6 +93,7 @@ export function TestResult({ result }: { result: LlmTestResult | { pending: true
   return (
     <span className="test-result test-ok">
       成功（{(result.latencyMs / 1000).toFixed(1)} 秒）：{result.reply || '（空白回應）'}
+      {result.image && <img className="test-image" src={result.image} alt="測試生成的圖片" />}
     </span>
   );
 }

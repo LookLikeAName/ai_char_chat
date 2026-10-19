@@ -13,6 +13,39 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'openai-compatible': 'OpenAI 相容端點',
 };
 
+/** 設定檔的用途：聊天（avatar 與系統工具模型）、圖片生成（頭像與照片）、記憶嵌入 */
+export const PROFILE_KINDS = ['chat', 'image', 'embedding'] as const;
+export type ProfileKind = (typeof PROFILE_KINDS)[number];
+export const PROFILE_KIND_LABELS: Record<ProfileKind, string> = {
+  chat: '聊天',
+  image: '圖片生成',
+  embedding: '記憶嵌入',
+};
+export const PROFILE_KIND_HINTS: Record<ProfileKind, string> = {
+  chat: 'avatar 的大腦與系統工具模型用的文字模型。',
+  image: '「設定 → 一般 → 頭像與照片生成」用的圖片模型：AI 生成頭像、avatar 傳的照片。',
+  embedding: '「設定 → 一般 → 記憶」用的嵌入模型，讓 avatar 想起相關的記憶。向量固定 768 維。',
+};
+/** 各用途支援的供應商 */
+export const KIND_PROVIDERS: Record<ProfileKind, readonly ProviderType[]> = {
+  chat: PROVIDER_TYPES,
+  image: ['google', 'openai', 'openai-compatible'],
+  embedding: ['google', 'openai', 'openai-compatible'],
+};
+/** 模型名稱的建議（下拉選單），依用途與供應商 */
+export const MODEL_SUGGESTIONS: Record<ProfileKind, Partial<Record<ProviderType, string[]>>> = {
+  // 聊天模型很多又常更新，用「取得模型清單」
+  chat: {},
+  image: {
+    google: ['gemini-2.5-flash-image', 'imagen-4.0-generate-001'],
+    openai: ['gpt-image-1', 'dall-e-3'],
+  },
+  embedding: {
+    google: ['gemini-embedding-001'],
+    openai: ['text-embedding-3-small', 'text-embedding-3-large'],
+  },
+};
+
 export const DEFAULT_BASE_URLS: Record<ProviderType, string | null> = {
   google: 'https://generativelanguage.googleapis.com/v1beta',
   anthropic: 'https://api.anthropic.com',
@@ -148,6 +181,7 @@ export function costUsd(pricing: LlmPricing | null | undefined, inputTokens: num
 
 export const llmProfileInputSchema = z
   .object({
+    kind: z.enum(PROFILE_KINDS).default('chat'),
     name: z.string().trim().min(1).max(60),
     provider: z.enum(PROVIDER_TYPES),
     baseUrl: z.string().trim().url().nullable().optional(),
@@ -162,12 +196,17 @@ export const llmProfileInputSchema = z
   .refine((p) => p.provider !== 'openai-compatible' || !!p.baseUrl, {
     message: 'OpenAI 相容端點必須填寫 Base URL',
     path: ['baseUrl'],
+  })
+  .refine((p) => KIND_PROVIDERS[p.kind].includes(p.provider), {
+    message: '這個供應商不支援這個用途',
+    path: ['provider'],
   });
 export type LlmProfileInput = z.infer<typeof llmProfileInputSchema>;
 
 /** 回給前端的設定檔：不含 API key 本身 */
 export interface LlmProfileDto {
   id: string;
+  kind: ProfileKind;
   name: string;
   provider: ProviderType;
   baseUrl: string | null;

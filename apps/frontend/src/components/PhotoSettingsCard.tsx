@@ -44,7 +44,7 @@ export function PhotoSettingsCard({
 
   const gen = settings?.imageGen;
   const genProfile = profiles.find((p) => p.id === gen?.profileId);
-  const canReference = gen && genProfile ? imageModelSupportsReference(genProfile.provider, gen.model) : true;
+  const canReference = gen && genProfile ? imageModelSupportsReference(genProfile.provider, genProfile.model) : true;
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.avatars });
 
   const upload = useMutation({

@@ -72,5 +72,5 @@ export async function embedderFromSettings(
 ): Promise<Embedder | null> {
   if (!settings.embedding) return null;
   const profile = await getProfile(db, settings.embedding.profileId);
-  return new ApiEmbedder({ ...resolveRow(profile, box), model: settings.embedding.model }, fetchFn);
+  return new ApiEmbedder(resolveRow(profile, box), fetchFn);
 }

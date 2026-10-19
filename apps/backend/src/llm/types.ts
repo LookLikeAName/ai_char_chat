@@ -36,7 +36,13 @@ export type FetchFn = typeof fetch;
 
 export interface ProviderAdapter {
   complete(llm: ResolvedLlm, req: ChatRequest, fetchFn: FetchFn): Promise<ChatResult>;
-  listModels(llm: ResolvedLlm, fetchFn: FetchFn): Promise<string[]>;
+  listModels(llm: ResolvedLlm, fetchFn: FetchFn): Promise<ListedModel[]>;
+}
+
+/** methods：供應商有提供時（Gemini）列出支援的呼叫方式，例如 generateContent、embedContent */
+export interface ListedModel {
+  name: string;
+  methods?: string[];
 }
 
 export class LlmError extends Error {

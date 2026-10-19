@@ -58,6 +58,6 @@ export const anthropicAdapter: ProviderAdapter = {
     const res = await requestJson<{ data?: { id: string }[] }>(fetchFn, `${trimSlash(llm.baseUrl)}/v1/models?limit=1000`, {
       headers: headers(llm),
     });
-    return (res.data ?? []).map((m) => m.id);
+    return (res.data ?? []).map((m) => ({ name: m.id }));
   },
 };

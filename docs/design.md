@@ -317,7 +317,9 @@ prompt 依序組成：
 實際參數 = 設定檔預設值 + 綁定的覆寫值（resolveParams）
 ```
 
-- **設定檔**：供應商類型、Base URL、API key、模型、參數預設值。API key 以 `APP_SECRET` 加密存放，API 只回傳「是否已設定」與最後 4 碼。
+- **設定檔**：用途、供應商類型、Base URL、API key、模型、參數預設值。API key 以 `APP_SECRET` 加密存放，API 只回傳「是否已設定」與最後 4 碼。
+- **用途**（`llm_profiles.kind`）：聊天（avatar 的大腦、系統工具模型）、圖片生成（頭像與照片）、記憶嵌入。「設定 → 一般」的頭像與照片生成、記憶只選設定檔，模型就是設定檔裡的模型；avatar 與系統工具模型只能綁聊天用的。參數、看得懂圖片、價格只有聊天用的設定檔有。圖片生成支援 Google、OpenAI（相容），記憶嵌入支援 Google、OpenAI（相容）。「取得模型清單」依用途篩選（Gemini 依 supportedGenerationMethods，其他依名稱），「測試連線」依用途：聊天回一句話、圖片生成回一張圖、記憶嵌入回向量維度。使用中的設定檔不能改用途。
+- 舊版的「頭像生成／記憶」是選設定檔再另外填模型；啟動時會轉換一次（`db/legacy.ts`）：那個設定檔沒有拿來聊天就直接改成對應用途，有的話複製一份（共用同一把 key）。
 - **綁定**：avatar 與系統工具模型各自選一個設定檔，再勾選要覆寫的參數。沒勾選的參數沿用設定檔；設定檔也沒填的，就用供應商預設值。
 - 可覆寫的參數：temperature、top P、最大輸出 tokens、presence／frequency penalty；供應商不支援的參數會在呼叫時略過（例如 Anthropic 沒有 penalty）。
 - **思考程度**（只有 Google Gemini）：讓模型自己決定、最少、低、中、高，一樣可以在設定檔設預設值、在 avatar 覆寫。依模型換算（`geminiThinkingConfig`）：Gemini 3 以後送 `thinkingLevel`（Gemini 3 Pro 只有 low／high，其他等級換成最接近的；「讓模型自己決定」不送）；Gemini 2.5 送 `thinkingBudget`（最少：Flash 0＝不思考、Pro 128；低 1024；中 8192；高：Flash 24576、Pro 32768；自己決定 -1）；2.0、1.5、Gemma 不送。兩個欄位不會同時送。思考的 tokens 算在輸出用量裡。

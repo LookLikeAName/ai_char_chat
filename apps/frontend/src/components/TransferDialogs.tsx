@@ -65,7 +65,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data: profiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const { data: allProfiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const profiles = allProfiles.filter((p) => p.kind === 'chat');
   const [file, setFile] = useState<TransferFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [profileId, setProfileId] = useState<string>('');

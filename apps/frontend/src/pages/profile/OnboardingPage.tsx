@@ -34,7 +34,8 @@ function Onboarding({ profile }: { profile: ProfileDto }) {
   const [step, setStep] = useState<Step>(profile.preferences ? 'bigFive' : 'intro');
   const { answers, answer, sync } = useAnswers(profile.answers);
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
-  const { data: llmProfiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const { data: allProfiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const llmProfiles = allProfiles.filter((p) => p.kind === 'chat');
   const idx = STEPS.indexOf(step);
 
   const go = (s: Step) => {

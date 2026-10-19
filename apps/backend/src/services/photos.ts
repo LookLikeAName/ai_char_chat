@@ -91,7 +91,7 @@ export async function takePhoto(
 ): Promise<MessageImage> {
   const gen = settings.imageGen!;
   const profile = await getProfile(deps.db, gen.profileId);
-  const llm = { ...resolveRow(profile, deps.box), model: gen.model };
+  const llm = resolveRow(profile, deps.box);
   const photo = avatarPhoto(avatar);
   const reference = await referenceImage(deps.mediaDir, avatar, photo, llm.provider, llm.model);
   const prompt = photoPrompt(avatar, description, {
@@ -105,7 +105,7 @@ export async function takePhoto(
   const log = (ok: boolean, error?: string) =>
     deps.db
       .insert(usageLog)
-      .values({ purpose: 'photo.generate', avatarId: avatar.id, profileId: profile.id, model: gen.model, latencyMs: Date.now() - started, ok, error: error?.slice(0, 500) ?? null })
+      .values({ purpose: 'photo.generate', avatarId: avatar.id, profileId: profile.id, model: profile.model, latencyMs: Date.now() - started, ok, error: error?.slice(0, 500) ?? null })
       .catch(() => {});
   let image;
   try {

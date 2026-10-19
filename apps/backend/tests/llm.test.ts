@@ -89,9 +89,13 @@ describe('Gemini', () => {
       models: [
         { name: 'models/gemini-a', supportedGenerationMethods: ['generateContent'] },
         { name: 'models/embed-b', supportedGenerationMethods: ['embedContent'] },
+        { name: 'models/gemini-2.5-flash-image', supportedGenerationMethods: ['generateContent'] },
+        { name: 'models/imagen-4.0-generate-001', supportedGenerationMethods: ['predict'] },
       ],
     });
     expect(await listModels(llm, fetchFn)).toEqual(['gemini-a']);
+    expect(await listModels(llm, fetchFn, 'embedding')).toEqual(['embed-b']);
+    expect(await listModels(llm, fetchFn, 'image')).toEqual(['gemini-2.5-flash-image', 'imagen-4.0-generate-001']);
   });
 });
 

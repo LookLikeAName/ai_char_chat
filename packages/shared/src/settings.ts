@@ -25,20 +25,14 @@ export const appSettingsSchema = z.object({
   showInnerThoughts: z.boolean().default(false),
   /** 系統工具模型：補完設定、萃取記憶、生活日誌… */
   utilityLlm: llmBindingSchema.nullable().default(null),
-  /** 頭像生成：用哪個 LLM 設定檔的 key 與端點、哪個圖片模型 */
-  imageGen: z
-    .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
-    .nullable()
-    .default(null),
+  /** 頭像與照片生成：用哪個「圖片生成」設定檔（模型就是設定檔裡的模型） */
+  imageGen: z.object({ profileId: z.uuid() }).nullable().default(null),
   /** avatar 傳照片（用頭像生成的圖片模型）：每個 avatar 每天最多幾張、照片的風格 */
   photos: z
     .object({ enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(50), style: z.enum(imageStyles) })
     .default({ enabled: true, dailyLimit: 5, style: 'realistic' }),
-  /** 記憶用的嵌入模型（Google 或 OpenAI 相容），向量固定 768 維 */
-  embedding: z
-    .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
-    .nullable()
-    .default(null),
+  /** 記憶用的嵌入模型：用哪個「記憶嵌入」設定檔；向量固定 768 維 */
+  embedding: z.object({ profileId: z.uuid() }).nullable().default(null),
   /** 除錯：記錄每次 LLM 呼叫的完整 context；事件與紀錄保留天數 */
   debug: z
     .object({ captureContext: z.boolean(), retentionDays: z.number().int().min(1).max(90) })

@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { IMAGE_STYLE_LABELS, PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } from '@acc/shared';
+import {
+  IMAGE_STYLE_LABELS,
+  PACING_LABELS,
+  PROFILE_KIND_LABELS,
+  PROVIDER_LABELS,
+  type AppSettings,
+  type LlmProfileDto,
+  type ReplyPacing,
+} from '@acc/shared';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -17,7 +25,8 @@ export function GeneralSettings() {
 function GeneralForm({ initial }: { initial: AppSettings }) {
   const [s, setS] = useState(initial);
   const { data: profiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
-  const imageProfiles = profiles.filter((p) => p.provider !== 'anthropic');
+  const imageProfiles = profiles.filter((p) => p.kind === 'image');
+  const embeddingProfiles = profiles.filter((p) => p.kind === 'embedding');
   const toast = useToast();
   const qc = useQueryClient();
   const timezones = useMemo(() => Intl.supportedValuesOf('timeZone'), []);
@@ -168,81 +177,26 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
         <p className="hint">
           avatar 用嵌入模型找出和目前對話相關的記憶。沒有設定時改用關鍵字與時間挑選，效果較差。記憶的整理與每日的印象由系統工具模型負責。
         </p>
-        <label className="field">
-          <span className="field-label">嵌入模型的設定檔</span>
-          <select
-            value={s.embedding?.profileId ?? ''}
-            onChange={(e) =>
-              patch({
-                embedding: e.target.value
-                  ? { profileId: e.target.value, model: s.embedding?.model || 'gemini-embedding-001' }
-                  : null,
-              })
-            }
-          >
-            <option value="">（不使用）</option>
-            {imageProfiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}（{PROVIDER_LABELS[p.provider]}）
-              </option>
-            ))}
-          </select>
-        </label>
-        {s.embedding && (
-          <label className="field">
-            <span className="field-label">嵌入模型</span>
-            <input
-              value={s.embedding.model}
-              list="embedding-models"
-              onChange={(e) => patch({ embedding: { ...s.embedding!, model: e.target.value } })}
-            />
-            <datalist id="embedding-models">
-              <option value="gemini-embedding-001" />
-              <option value="text-embedding-3-small" />
-            </datalist>
-            <span className="hint">向量固定 768 維；換模型後，舊的記憶會在背景重新嵌入。</span>
-          </label>
-        )}
+        <ProfilePicker
+          label="嵌入模型"
+          kind="embedding"
+          options={embeddingProfiles}
+          value={s.embedding?.profileId ?? null}
+          onChange={(profileId) => patch({ embedding: profileId ? { profileId } : null })}
+          hint="換模型後，舊的記憶會在背景重新嵌入。"
+        />
       </section>
 
       <section className="card">
         <h2>頭像與照片生成</h2>
-        <p className="hint">
-          用哪個 LLM 設定檔的 API key 與端點，以及哪個圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。AI 生成頭像、avatar 傳照片都用這裡的設定。
-        </p>
-        <label className="field">
-          <span className="field-label">設定檔</span>
-          <select
-            value={s.imageGen?.profileId ?? ''}
-            onChange={(e) =>
-              patch({ imageGen: e.target.value ? { profileId: e.target.value, model: s.imageGen?.model ?? '' } : null })
-            }
-          >
-            <option value="">（不使用）</option>
-            {imageProfiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}（{PROVIDER_LABELS[p.provider]}）
-              </option>
-            ))}
-          </select>
-        </label>
-        {s.imageGen && (
-          <label className="field">
-            <span className="field-label">圖片模型</span>
-            <input
-              value={s.imageGen.model}
-              list="image-models"
-              placeholder="例如 gemini-2.5-flash-image、imagen-4.0-generate-001、gpt-image-1"
-              onChange={(e) => patch({ imageGen: { ...s.imageGen!, model: e.target.value } })}
-            />
-            <datalist id="image-models">
-              <option value="gemini-2.5-flash-image" />
-              <option value="imagen-4.0-generate-001" />
-              <option value="gpt-image-1" />
-            </datalist>
-            <span className="hint">模型名稱以 imagen 開頭的走 Imagen API，其他 Google 模型走 Gemini 的圖片輸出。</span>
-          </label>
-        )}
+        <p className="hint">AI 生成頭像、avatar 傳照片都用這裡選的圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。</p>
+        <ProfilePicker
+          label="圖片模型"
+          kind="image"
+          options={imageProfiles}
+          value={s.imageGen?.profileId ?? null}
+          onChange={(profileId) => patch({ imageGen: profileId ? { profileId } : null })}
+        />
         <label className="check">
           <input
             type="checkbox"
@@ -338,7 +292,7 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
           type="submit"
           className="btn btn-primary"
           disabled={
-            !dirty || save.isPending || (!!s.imageGen && !s.imageGen.model.trim()) || (!!s.embedding && !s.embedding.model.trim())
+            !dirty || save.isPending
           }
         >
           {save.isPending ? '儲存中…' : '儲存'}
@@ -369,5 +323,50 @@ function NotificationToggle() {
       </label>
       <p className="hint">這個分頁在背景時，avatar 傳來訊息會跳出通知。只對這個瀏覽器有效，馬上生效。</p>
     </>
+  );
+}
+
+/** 選一個「圖片生成」或「記憶嵌入」用的設定檔；模型就是設定檔裡的模型 */
+function ProfilePicker({
+  label,
+  kind,
+  options,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  kind: 'image' | 'embedding';
+  options: LlmProfileDto[];
+  value: string | null;
+  onChange: (profileId: string | null) => void;
+  hint?: string;
+}) {
+  const selected = options.find((p) => p.id === value);
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">（不使用）</option>
+        {options.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}（{PROVIDER_LABELS[p.provider]} · {p.model}）
+          </option>
+        ))}
+      </select>
+      <span className="hint">
+        {options.length === 0 ? (
+          <>
+            還沒有{PROFILE_KIND_LABELS[kind]}用的設定檔，
+            <Link to={`/settings/llm?new=${kind}`}>到 LLM 設定檔新增一個</Link>（可以用同一把 API key）。
+          </>
+        ) : (
+          <>
+            {selected ? `使用模型 ${selected.model}。` : ''}
+            {hint}要換模型或新增，到 <Link to="/settings/llm">LLM 設定檔</Link>。
+          </>
+        )}
+      </span>
+    </label>
   );
 }

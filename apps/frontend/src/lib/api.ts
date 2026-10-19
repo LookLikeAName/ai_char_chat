@@ -28,6 +28,7 @@ import type {
   UsageSummaryDto,
   AuthStatusDto,
   AvatarPhoto,
+  ProfileKind,
   UploadDto,
   ImportRequest,
   ImportResultDto,
@@ -63,11 +64,12 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 }
 
 export type LlmTestResult =
-  | { ok: true; reply: string; latencyMs: number; params: LlmParams }
+  | { ok: true; reply: string; latencyMs: number; params: LlmParams; image?: string }
   | { ok: false; error: string; latencyMs: number };
 
 export interface LlmDraft {
   profileId?: string;
+  kind?: ProfileKind;
   provider: ProviderType;
   baseUrl?: string | null;
   model: string;

@@ -53,6 +53,6 @@ export const openaiAdapter: ProviderAdapter = {
     const res = await requestJson<{ data?: { id: string }[] }>(fetchFn, `${trimSlash(llm.baseUrl)}/models`, {
       headers: headers(llm),
     });
-    return (res.data ?? []).map((m) => m.id).sort();
+    return (res.data ?? []).map((m) => ({ name: m.id })).sort((a, b) => a.name.localeCompare(b.name));
   },
 };

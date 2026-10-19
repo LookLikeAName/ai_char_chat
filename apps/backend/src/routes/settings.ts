@@ -12,9 +12,9 @@ export async function settingsRoutes(app: FastifyInstance) {
     const patch = parseBody(appSettingsPatchSchema, req.body);
     const next = appSettingsSchema.parse({ ...(await loadSettings(db)), ...patch });
     if (!isValidTimezone(next.timezone)) throw new HttpError(400, `無效的時區：${next.timezone}`);
-    if (next.utilityLlm) await assertProfileExists(db, next.utilityLlm.profileId);
-    if (next.embedding) await assertProfileExists(db, next.embedding.profileId);
-    if (next.imageGen) await assertProfileExists(db, next.imageGen.profileId);
+    if (next.utilityLlm) await assertProfileExists(db, next.utilityLlm.profileId, 'chat');
+    if (next.embedding) await assertProfileExists(db, next.embedding.profileId, 'embedding');
+    if (next.imageGen) await assertProfileExists(db, next.imageGen.profileId, 'image');
     await saveSettings(db, next);
     await events.publish({ type: 'settings.changed' });
     return next;

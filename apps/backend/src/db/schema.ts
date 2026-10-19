@@ -28,6 +28,7 @@ import type {
   Mood,
   PersonaDraft,
   Preferences,
+  ProfileKind,
   ProviderType,
   RelationshipEventRecord,
   SeenReason,
@@ -80,6 +81,8 @@ export const authState = pgTable('auth_state', {
 
 export const llmProfiles = pgTable('llm_profiles', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  /** 用途：chat（聊天）、image（圖片生成）、embedding（記憶嵌入） */
+  kind: text('kind').$type<ProfileKind>().notNull().default('chat'),
   name: text('name').notNull(),
   provider: text('provider').$type<ProviderType>().notNull(),
   baseUrl: text('base_url'),

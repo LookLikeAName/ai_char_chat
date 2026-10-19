@@ -74,8 +74,6 @@ export const googleAdapter: ProviderAdapter = {
       `${trimSlash(llm.baseUrl)}/models?pageSize=1000`,
       { headers: llm.apiKey ? { 'x-goog-api-key': llm.apiKey } : {} },
     );
-    return (res.models ?? [])
-      .filter((m) => m.supportedGenerationMethods?.includes('generateContent') ?? true)
-      .map((m) => m.name.replace(/^models\//, ''));
+    return (res.models ?? []).map((m) => ({ name: m.name.replace(/^models\//, ''), methods: m.supportedGenerationMethods }));
   },
 };

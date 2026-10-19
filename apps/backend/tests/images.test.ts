@@ -83,6 +83,7 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
     visionProfile = await mk('vision-model', true);
     blindProfile = await mk('text-model', null);
     imageProfile = await mk('gemini-image', null, 'google');
+    await db.update(llmProfiles).set({ kind: 'image' }).where(eq(llmProfiles.id, imageProfile));
     const [a] = await db.insert(avatars).values({ name: '小雨', persona: SAMPLE_PERSONA, llm: { profileId: visionProfile, params: {} } }).returning();
     avatarId = a!.id;
     const [c] = await db.insert(conversations).values({ type: 'dm' }).returning();
@@ -146,7 +147,7 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
     await db.update(avatars).set({ imagePath: 'avatars/me.png' }).where(eq(avatars.id, avatarId));
     await saveSettings(
       db,
-      appSettingsSchema.parse({ replyPacing: 'instant', imageGen: { profileId: imageProfile, model: 'gemini-image' }, photos: { enabled: true, dailyLimit: 1, style: 'realistic' } }),
+      appSettingsSchema.parse({ replyPacing: 'instant', imageGen: { profileId: imageProfile }, photos: { enabled: true, dailyLimit: 1, style: 'realistic' } }),
     );
     reply = () => JSON.stringify({ messages: ['你看'], photo: '吧檯上剛拉好花的拿鐵' });
     await db.insert(messages).values({ conversationId, senderType: 'user', content: '在幹嘛' });
@@ -176,8 +177,10 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
   });
 
   describe('每個 avatar 自己的照片設定', () => {
-    const useImageModel = (profileId: string, model: string) =>
-      saveSettings(db, appSettingsSchema.parse({ replyPacing: 'instant', imageGen: { profileId, model } }));
+    const useImageModel = async (profileId: string, model: string) => {
+      await db.update(llmProfiles).set({ kind: 'image', model }).where(eq(llmProfiles.id, profileId));
+      await saveSettings(db, appSettingsSchema.parse({ replyPacing: 'instant', imageGen: { profileId } }));
+    };
     const askPhoto = async () => {
       reply = () => JSON.stringify({ messages: ['給你看'], photo: '窗邊的玩偶' });
       await db.insert(messages).values({ conversationId, senderType: 'user', content: '在幹嘛' });
@@ -218,7 +221,7 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
     it('gpt-image 有參考圖時走 /images/edits；Imagen 不支援參考圖就照常生成', async () => {
       const [openai] = await db
         .insert(llmProfiles)
-        .values({ name: 'oa', provider: 'openai', baseUrl: 'http://oa.test/v1', model: 'gpt-4o' })
+        .values({ kind: 'image', name: 'oa', provider: 'openai', baseUrl: 'http://oa.test/v1', model: 'gpt-image-1' })
         .returning();
       const calls: { url: string; body: BodyInit | null | undefined }[] = [];
       const png = fakePng(1024, 1536).toString('base64');
@@ -228,7 +231,7 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
       }) as unknown as FetchFn;
       const { takePhoto } = await import('../src/services/photos.ts');
       const [row] = await db.select().from(avatars).where(eq(avatars.id, avatarId));
-      const settings = appSettingsSchema.parse({ imageGen: { profileId: openai!.id, model: 'gpt-image-1' } });
+      const settings = appSettingsSchema.parse({ imageGen: { profileId: openai!.id } });
       await takePhoto({ db, box, mediaDir, fetchFn: imgFetch }, settings, row!, '自拍');
       expect(calls[0]!.url).toBe('http://oa.test/v1/images/edits');
       const form = calls[0]!.body as FormData;
@@ -236,7 +239,8 @@ describe.skipIf(!url)('圖片訊息與照片', () => {
       expect(form.get('size')).toBe('1024x1536');
       expect((form.get('image') as Blob).size).toBe(33);
 
-      const imagen = appSettingsSchema.parse({ imageGen: { profileId: imageProfile, model: 'imagen-4.0-generate-001' } });
+      await db.update(llmProfiles).set({ model: 'imagen-4.0-generate-001' }).where(eq(llmProfiles.id, imageProfile));
+      const imagen = appSettingsSchema.parse({ imageGen: { profileId: imageProfile } });
       await takePhoto({ db, box, mediaDir, fetchFn: imgFetch }, imagen, row!, '自拍');
       expect(calls[1]!.url).toContain(':predict');
     });

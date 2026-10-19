@@ -1,11 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { llmParamsSchema, llmProfileInputSchema, PROVIDER_TYPES, resolveParams, type LlmParams } from '@acc/shared';
+import {
+  llmParamsSchema,
+  llmProfileInputSchema,
+  PROFILE_KINDS,
+  PROVIDER_TYPES,
+  resolveParams,
+  type LlmParams,
+  type ProfileKind,
+} from '@acc/shared';
 import { keyHint } from '../crypto.ts';
 import { llmProfiles } from '../db/schema.ts';
 import { HttpError, parseBody } from '../errors.ts';
+import { generateImage } from '../images/generate.ts';
 import { complete, listModels, LlmError, type ResolvedLlm } from '../llm/index.ts';
+import { ApiEmbedder } from '../memory/embedder.ts';
 import {
   getProfile,
   profileToDto,
@@ -20,6 +30,7 @@ const idParams = z.object({ id: z.uuid() });
 /** 還沒儲存的設定（設定頁的表單內容）；沒有填 apiKey 時沿用 profileId 已存的 key */
 const draftSchema = z.object({
   profileId: z.uuid().optional(),
+  kind: z.enum(PROFILE_KINDS).default('chat'),
   provider: z.enum(PROVIDER_TYPES),
   baseUrl: z.string().trim().url().nullable().optional(),
   model: z.string().trim().default(''),
@@ -28,6 +39,7 @@ const draftSchema = z.object({
 });
 
 const TEST_PROMPT = '請用一句繁體中文自我介紹（20 字以內）。';
+const TEST_IMAGE_PROMPT = '一顆紅色的蘋果放在白色的木桌上，簡單乾淨的插畫，沒有文字。';
 
 export async function llmProfileRoutes(app: FastifyInstance) {
   const { db, box, events } = app.deps;
@@ -46,6 +58,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const [row] = await db
       .insert(llmProfiles)
       .values({
+        kind: input.kind,
         name: input.name,
         provider: input.provider,
         baseUrl: input.baseUrl ?? null,
@@ -64,7 +77,12 @@ export async function llmProfileRoutes(app: FastifyInstance) {
   app.put('/llm-profiles/:id', async (req) => {
     const { id } = parseBody(idParams, req.params);
     const input = parseBody(llmProfileInputSchema, req.body);
-    await getProfile(db, id);
+    const current = await getProfile(db, id);
+    // 正在使用中的設定檔不能改用途（例如 avatar 綁著的不能改成圖片生成）
+    if (current.kind !== input.kind) {
+      const inUse = await usesOf(id);
+      if (inUse) throw new HttpError(409, `這個設定檔${inUse}，不能改用途；可以另外新增一個`);
+    }
     const keyFields =
       input.apiKey === undefined
         ? {}
@@ -74,6 +92,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const [row] = await db
       .update(llmProfiles)
       .set({
+        kind: input.kind,
         name: input.name,
         provider: input.provider,
         baseUrl: input.baseUrl ?? null,
@@ -98,7 +117,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const settings = await loadSettings(db);
     if (settings.utilityLlm?.profileId === id) throw new HttpError(409, '系統工具模型正在使用這個設定檔');
     if (settings.embedding?.profileId === id) throw new HttpError(409, '記憶的嵌入模型正在使用這個設定檔');
-    if (settings.imageGen?.profileId === id) throw new HttpError(409, '頭像生成正在使用這個設定檔');
+    if (settings.imageGen?.profileId === id) throw new HttpError(409, '頭像與照片生成正在使用這個設定檔');
     await db.delete(llmProfiles).where(eq(llmProfiles.id, id));
     await events.publish({ type: 'llmProfiles.changed' });
     return reply.status(204).send();
@@ -109,21 +128,21 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const { id } = parseBody(idParams, req.params);
     const { params } = parseBody(z.object({ params: llmParamsSchema.default({}) }), req.body ?? {});
     const row = await getProfile(db, id);
-    return runTest(resolveRow(row, box), resolveParams(row.defaults, params));
+    return runTest(row.kind, resolveRow(row, box), resolveParams(row.defaults, params));
   });
 
   /** 測試表單裡還沒儲存的設定 */
   app.post('/llm-profiles/test-draft', async (req) => {
     const draft = parseBody(draftSchema, req.body);
     if (!draft.model) throw new HttpError(400, '請先填寫模型名稱');
-    return runTest(await resolveDraft(draft), draft.params);
+    return runTest(draft.kind, await resolveDraft(draft), draft.params);
   });
 
   /** 列出供應商可用的模型，給設定頁的模型下拉選單 */
   app.post('/llm-profiles/models', async (req) => {
     const draft = parseBody(draftSchema, req.body);
     try {
-      return { models: await listModels(await resolveDraft(draft), fetchFn) };
+      return { models: await listModels(await resolveDraft(draft), fetchFn, draft.kind) };
     } catch (err) {
       if (err instanceof LlmError) throw new HttpError(502, err.message);
       throw err;
@@ -139,9 +158,34 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     return toResolved(draft, apiKey);
   }
 
-  async function runTest(llm: ResolvedLlm, params: LlmParams) {
+  /** 用在哪裡；沒有在用時回傳 null */
+  async function usesOf(id: string): Promise<string | null> {
+    const avatarsUsing = (await profileUsage(db)).get(id) ?? 0;
+    if (avatarsUsing) return `還有 ${avatarsUsing} 個 avatar 綁定`;
+    const s = await loadSettings(db);
+    if (s.utilityLlm?.profileId === id) return '是系統工具模型';
+    if (s.imageGen?.profileId === id) return '正用在頭像與照片生成';
+    if (s.embedding?.profileId === id) return '正用在記憶';
+    return null;
+  }
+
+  async function runTest(kind: ProfileKind, llm: ResolvedLlm, params: LlmParams) {
     const started = Date.now();
     try {
+      if (kind === 'image') {
+        const img = await generateImage(llm, TEST_IMAGE_PROMPT, fetchFn);
+        return {
+          ok: true as const,
+          reply: '生成了一張測試圖片',
+          image: `data:${img.mime};base64,${img.data.toString('base64')}`,
+          latencyMs: Date.now() - started,
+          params: {},
+        };
+      }
+      if (kind === 'embedding') {
+        const [v] = await new ApiEmbedder(llm, fetchFn).embed(['測試一下嵌入模型'], 'query');
+        return { ok: true as const, reply: `嵌入成功：${v!.length} 維向量`, latencyMs: Date.now() - started, params: {} };
+      }
       const res = await complete(
         llm,
         { messages: [{ role: 'user', content: TEST_PROMPT }], params, timeoutMs: 30_000 },
