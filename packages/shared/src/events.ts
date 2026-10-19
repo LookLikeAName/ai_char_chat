@@ -1,5 +1,6 @@
 // 伺服器經 WebSocket 推給瀏覽器的事件。api 與 worker 都透過 Redis 發佈，由 api 轉送。
 import type { MessageDto } from './chat.ts';
+import type { DebugEventDto, TraceSummaryDto } from './debug.ts';
 
 export type ServerEvent =
   | { type: 'hello'; serverTime: string }
@@ -16,7 +17,13 @@ export type ServerEvent =
   | { type: 'settings.changed' }
   | { type: 'profile.changed' }
   /** 心情、關係或記憶有變化 */
-  | { type: 'avatar.state.changed'; avatarId: string };
+  | { type: 'avatar.state.changed'; avatarId: string }
+  /** 只送給訂閱了 debug 的分頁（監控頁） */
+  | { type: 'debug.event'; event: DebugEventDto }
+  | { type: 'debug.trace'; trace: TraceSummaryDto };
+
+/** 瀏覽器送給伺服器的訊息 */
+export type ClientMessage = { type: 'subscribe'; topics: 'debug'[] } | { type: 'unsubscribe'; topics: 'debug'[] };
 
 export interface HealthDto {
   ok: boolean;

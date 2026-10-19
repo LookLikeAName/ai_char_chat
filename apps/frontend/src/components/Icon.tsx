@@ -11,6 +11,7 @@ const PATHS = {
   back: 'M15 5l-7 7 7 7',
   trash: 'M5 7h14M10 7V4h4v3m-7 0l1 13h8l1-13',
   image: 'M4 5h16v14H4zm0 11l5-5 4 4 3-3 4 4M15 9h.01',
+  pulse: 'M3 12h4l3-7 4 14 3-7h4',
   group: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 9a6 6 0 0 1 12 0m1-9a3 3 0 1 0 0-6m2 15a6 6 0 0 0-3-5.2',
 } as const;
 

@@ -4,6 +4,7 @@ import { Rail } from './components/Rail.tsx';
 import { api, qk } from './lib/api.ts';
 import { AvatarsPage } from './pages/avatars/AvatarsPage.tsx';
 import { ChatsPage } from './pages/chats/ChatsPage.tsx';
+import { MonitorPage } from './pages/monitor/MonitorPage.tsx';
 import { OnboardingPage } from './pages/profile/OnboardingPage.tsx';
 import { ProfilePage } from './pages/profile/ProfilePage.tsx';
 import { SettingsPage } from './pages/settings/SettingsPage.tsx';
@@ -13,7 +14,7 @@ export function App() {
   const { data: profile } = useQuery({ queryKey: qk.profile, queryFn: api.profile });
   // 第一次使用（還沒填偏好問卷）先到歡迎頁；設定頁不擋，方便先設定 LLM
   const firstRun =
-    profile && !profile.preferences && !/^\/(welcome|settings)/.test(location.pathname);
+    profile && !profile.preferences && !/^\/(welcome|settings|monitor)/.test(location.pathname);
 
   return (
     <div className="app">
@@ -26,6 +27,7 @@ export function App() {
         <Route path="/avatars/:avatarId?" element={<AvatarsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings/*" element={<SettingsPage />} />
+        <Route path="/monitor/*" element={<MonitorPage />} />
         <Route path="*" element={<Navigate to="/chats" replace />} />
       </Routes>
     </div>

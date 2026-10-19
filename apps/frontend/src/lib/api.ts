@@ -12,7 +12,14 @@ import type {
   MessageDto,
   PersonaGenerateInput,
   PersonaGenerateResult,
+  DebugEventDto,
   PersonaIssue,
+  PromptPreviewDto,
+  QueueDto,
+  RetrievalRowDto,
+  TraceDto,
+  TraceSummaryDto,
+  UsageRowDto,
   Preferences,
   ProfileDto,
   ProviderType,
@@ -26,6 +33,12 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+function query(params: Record<string, string | undefined>): string {
+  const q = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => !!e[1]));
+  const str = q.toString();
+  return str ? `?${str}` : '';
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -98,6 +111,27 @@ export const api = {
   resetRelationship: (id: string, stage: InitialStage) =>
     request<{ ok: true }>('POST', `/api/avatars/${id}/relationship/reset`, { stage }),
   reflectNow: (id: string) => request<{ updated: boolean }>('POST', `/api/avatars/${id}/reflect`),
+
+  debug: {
+    events: (params: Record<string, string | undefined>) =>
+      request<DebugEventDto[]>('GET', `/api/debug/events${query(params)}`),
+    traces: (params: Record<string, string | undefined>) =>
+      request<TraceSummaryDto[]>('GET', `/api/debug/traces${query(params)}`),
+    trace: (id: string) => request<TraceDto>('GET', `/api/debug/traces/${id}`),
+    queue: () => request<QueueDto>('GET', '/api/debug/queue'),
+    promote: (jobId: string) => request<{ ok: boolean }>('POST', `/api/debug/queue/${encodeURIComponent(jobId)}/promote`),
+    replyNow: (conversationId: string) => request<{ ok: true }>('POST', `/api/debug/conversations/${conversationId}/reply-now`),
+    extractNow: (conversationId: string) =>
+      request<{ ok: true }>('POST', `/api/debug/conversations/${conversationId}/extract-now`),
+    run: (task: 'proactive-tick' | 'maintenance') => request<{ ok: true }>('POST', `/api/debug/run/${task}`),
+    usage: (hours: number) => request<UsageRowDto[]>('GET', `/api/debug/usage?hours=${hours}`),
+    preview: (conversationId: string, mode: 'reply' | 'proactive') =>
+      request<PromptPreviewDto>('GET', `/api/debug/preview/${conversationId}?mode=${mode}`),
+    retrieve: (avatarId: string, q: string) =>
+      request<{ embedder: string | null; rows: RetrievalRowDto[] }>('POST', `/api/debug/avatars/${avatarId}/retrieve`, {
+        query: q,
+      }),
+  },
 
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>

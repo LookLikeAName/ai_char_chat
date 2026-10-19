@@ -6,6 +6,7 @@ import { avatars, lifeLogs } from '../db/schema.ts';
 import { renderPersona } from '../persona/describe.ts';
 import { callUtility, parseJsonObject } from '../persona/utility.ts';
 import { completePersona } from '../reply/prompt.ts';
+import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -56,5 +57,12 @@ ${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}
     .slice(0, 10);
   if (!events.length) return null;
   await ctx.db.insert(lifeLogs).values({ avatarId: avatar.id, date, events }).onConflictDoNothing();
+  await logEvent({
+    category: 'life',
+    type: 'life.generated',
+    avatarId: avatar.id,
+    message: `${avatar.name}：產生了 ${date} 的生活日誌（${events.length} 件事）`,
+    data: { events },
+  });
   return (await getLifeLog(ctx.db, avatar.id, date)) ?? events;
 }

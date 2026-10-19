@@ -6,6 +6,7 @@ import type { Db } from '../db/client.ts';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
 import { callUtility, parseJsonObject } from '../persona/utility.ts';
+import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
 import { formatNow } from '../reply/prompt.ts';
 import type { Embedder } from './embedder.ts';
@@ -105,6 +106,14 @@ importance：1 = 小事，5 = 值得記得，10 = 非常重要、會一直記得
       visibility: member.type === 'dm' ? 'private' : `group:${conversationId}`,
     })),
   );
+  await logEvent({
+    category: 'memory',
+    type: 'memory.extract',
+    avatarId: avatar.id,
+    conversationId,
+    message: `${avatar.name}：從 ${rows.length} 則訊息整理出 ${items.length} 件記憶`,
+    data: { memories: items },
+  });
   await db
     .update(conversationMembers)
     .set({ memoryUpTo: last.createdAt })

@@ -2,10 +2,11 @@
 // 依作息（空閒／忙碌／睡覺）、回訊息習慣、還沒讀的訊息累積的壓力，以及回覆節奏設定。
 // 預計時間存在 conversation_members.reply_due_at，新的訊息只會讓它提前，不會延後。
 import { and, desc, eq, gt } from 'drizzle-orm';
-import { availabilityAt, planSeen, type Availability, type SeenPlan } from '@acc/shared';
+import { availabilityAt, planSeen, SEEN_REASON_LABELS, STATUS_LABELS, type Availability, type SeenPlan } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { JobQueue } from '../jobs.ts';
+import { logEvent } from '../observability.ts';
 import { loadSettings } from '../services/settings.ts';
 import type { Random } from './timing.ts';
 
@@ -66,9 +67,34 @@ export async function scheduleReply(
 
   // 已經排了更早的時間（而且還沒過期）就維持原本的
   const existing = member.replyDueAt;
+  const minutes = (d: Date) => Math.round((d.getTime() - now.getTime()) / 6000) / 10;
+  const data = {
+    availability: { ...availability, until: availability.until?.toISOString() ?? null },
+    chatting,
+    pacing: settings.replyPacing,
+    unseen: unseen.length,
+    plan: { at: plan.at.toISOString(), reason: plan.reason },
+    existing: existing?.toISOString() ?? null,
+  };
   if (existing && existing.getTime() >= now.getTime() - 60_000 && existing <= plan.at) {
+    await logEvent({
+      category: 'reply',
+      type: 'reply.kept',
+      avatarId: avatar.id,
+      conversationId,
+      message: `${avatar.name}：已經排在 ${minutes(existing)} 分鐘後看到，這次算出 ${minutes(plan.at)} 分鐘，維持原本的`,
+      data,
+    });
     return { at: existing, reason: member.replyReason ?? plan.reason };
   }
+  await logEvent({
+    category: 'reply',
+    type: 'reply.scheduled',
+    avatarId: avatar.id,
+    conversationId,
+    message: `${avatar.name}（${chatting ? '聊天中' : STATUS_LABELS[availability.status]}${availability.activity ? `・${availability.activity}` : ''}）預計 ${minutes(plan.at)} 分鐘後看到：${SEEN_REASON_LABELS[plan.reason]}${existing ? '（提前）' : ''}`,
+    data,
+  });
   await db
     .update(conversationMembers)
     .set({ replyDueAt: plan.at, replyReason: plan.reason })

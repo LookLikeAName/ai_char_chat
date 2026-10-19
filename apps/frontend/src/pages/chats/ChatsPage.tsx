@@ -308,7 +308,17 @@ function MessageList({
                   </span>
                 )}
                 <div className="msg-content">
-                  {showThoughts && m.innerThought && <div className="thought">💭 {m.innerThought}</div>}
+                  {showThoughts && (m.innerThought || m.traceId) && (
+                    <div className="thought">
+                      {m.innerThought && <>💭 {m.innerThought}</>}
+                      {m.proactive && <span className="tag">主動</span>}
+                      {m.traceId && (
+                        <Link className="trace-link" to={`/monitor/traces/${m.traceId}`} title="查看這次回覆送出的 context">
+                          context
+                        </Link>
+                      )}
+                    </div>
+                  )}
                   <div className="msg-line">
                     <div className="msg-bubble">{m.content}</div>
                     <span className="msg-meta">

@@ -16,6 +16,9 @@ import {
 } from 'drizzle-orm/pg-core';
 import type {
   AllAnswers,
+  EventCategory,
+  EventLevel,
+  TraceDto,
   LifeLogEvent,
   LlmBinding,
   LlmParams,
@@ -35,6 +38,8 @@ export interface MessageMeta {
   systemKind?: 'error' | 'notice';
   /** avatar 主動傳的訊息（不是回覆） */
   proactive?: boolean;
+  /** 產生這則訊息的 LLM 呼叫 */
+  traceId?: string;
 }
 
 const timestamps = {
@@ -237,4 +242,47 @@ export const lifeLogs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.avatarId, t.date] })],
+);
+
+/** 事件 log：決策與狀態變化，給監控頁看 */
+export const eventLog = pgTable(
+  'event_log',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    at: timestamp('at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+    level: text('level').$type<EventLevel>().notNull(),
+    category: text('category').$type<EventCategory>().notNull(),
+    type: text('type').notNull(),
+    message: text('message').notNull(),
+    avatarId: uuid('avatar_id'),
+    conversationId: uuid('conversation_id'),
+    traceId: uuid('trace_id'),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [index('event_log_at_idx').on(t.at), index('event_log_avatar_idx').on(t.avatarId, t.at)],
+);
+
+/** LLM 呼叫的完整紀錄（context 與回應）；定期清除 */
+export const llmTraces = pgTable(
+  'llm_traces',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+    purpose: text('purpose').notNull(),
+    avatarId: uuid('avatar_id'),
+    conversationId: uuid('conversation_id'),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    params: jsonb('params').$type<Record<string, unknown>>().notNull().default({}),
+    /** 沒有開啟「記錄完整 context」時為 null */
+    request: jsonb('request').$type<TraceDto['request'] | null>(),
+    response: text('response'),
+    parsed: jsonb('parsed'),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    latencyMs: integer('latency_ms').notNull().default(0),
+    ok: boolean('ok').notNull(),
+    error: text('error'),
+  },
+  (t) => [index('llm_traces_created_idx').on(t.createdAt)],
 );

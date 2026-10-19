@@ -1,4 +1,4 @@
-import { Queue } from 'bullmq';
+import { Queue, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -6,6 +6,8 @@ import { SecretBox } from './crypto.ts';
 import { createDb, runMigrations } from './db/client.ts';
 import { RedisEventPublisher, subscribeEvents } from './events/bus.ts';
 import { AGENT_QUEUE, REPLY_JOB_OPTIONS, type AgentJob, type JobQueue } from './jobs.ts';
+import { setupObservability } from './observabilitySetup.ts';
+import type { QueueInspector } from './routes/debug.ts';
 import { WsHub } from './ws.ts';
 
 const config = loadConfig();
@@ -25,15 +27,49 @@ const jobs: JobQueue = {
   },
 };
 
+const toDto = (j: Job<AgentJob>, delayed = false) => ({
+  id: j.id ?? '',
+  kind: j.data.kind,
+  data: j.data as unknown as Record<string, unknown>,
+  at: new Date(delayed ? j.timestamp + (j.opts.delay ?? 0) : j.timestamp).toISOString(),
+  attempts: j.attemptsMade,
+  failedReason: j.failedReason ?? null,
+});
+const inspector: QueueInspector = {
+  async snapshot() {
+    const [counts, delayed, active, failed] = await Promise.all([
+      queue.getJobCounts('waiting', 'delayed', 'active', 'completed', 'failed'),
+      queue.getDelayed(0, 99),
+      queue.getActive(0, 49),
+      queue.getFailed(0, 29),
+    ]);
+    return {
+      counts,
+      delayed: delayed.map((j) => toDto(j, true)).sort((a, b) => a.at.localeCompare(b.at)),
+      active: active.map((j) => toDto(j)),
+      failed: failed.map((j) => toDto(j)),
+    };
+  },
+  async promote(jobId) {
+    const job = await queue.getJob(jobId);
+    if (!job || !(await job.isDelayed())) return false;
+    await job.promote();
+    return true;
+  },
+};
+
 const hub = new WsHub();
 const unsubscribe = await subscribeEvents(config.redisUrl, (e) => hub.broadcast(e));
 
+const events = new RedisEventPublisher(redis);
+setupObservability(db, events);
 const app = await buildApp({
   db,
   box: new SecretBox(config.appSecret),
-  events: new RedisEventPublisher(redis),
+  events,
   jobs,
   redis,
+  queue: inspector,
   hub,
   mediaDir: config.mediaDir,
   logger: true,

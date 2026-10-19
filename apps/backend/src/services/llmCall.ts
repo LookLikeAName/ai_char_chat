@@ -1,9 +1,10 @@
-// 透過綁定呼叫 LLM，並把用量記進 usage_log（失敗也記）。
+// 透過綁定呼叫 LLM：用量記進 usage_log，完整的 context 記進 llm_traces（監控頁），失敗也記。
 import type { LlmBinding } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
 import { usageLog } from '../db/schema.ts';
 import { complete, type ChatRequest, type ChatResult, type FetchFn } from '../llm/index.ts';
+import { recordTrace } from '../observability.ts';
 import { resolveBinding } from './llmProfiles.ts';
 
 export interface CallContext {
@@ -17,7 +18,7 @@ export async function callWithBinding(
   binding: LlmBinding,
   req: Omit<ChatRequest, 'params'>,
   usage: { purpose: string; avatarId?: string | null },
-): Promise<ChatResult> {
+): Promise<ChatResult & { traceId: string | null }> {
   const { llm, params, profile } = await resolveBinding(ctx.db, ctx.box, binding);
   const started = Date.now();
   const log = (ok: boolean, res?: ChatResult, error?: string) =>
@@ -35,12 +36,28 @@ export async function callWithBinding(
         error: error?.slice(0, 500) ?? null,
       })
       .catch(() => {});
+  const trace = (ok: boolean, res?: ChatResult, error?: string) =>
+    recordTrace({
+      purpose: usage.purpose,
+      avatarId: usage.avatarId,
+      provider: profile.provider,
+      model: profile.model,
+      params: params as Record<string, unknown>,
+      request: { system: req.system, messages: req.messages, json: req.json },
+      response: res?.text ?? null,
+      inputTokens: res?.usage.inputTokens ?? 0,
+      outputTokens: res?.usage.outputTokens ?? 0,
+      latencyMs: Date.now() - started,
+      ok,
+      error: error?.slice(0, 1000) ?? null,
+    });
   try {
     const res = await complete(llm, { ...req, params }, ctx.fetchFn);
     await log(true, res);
-    return res;
+    return { ...res, traceId: await trace(true, res) };
   } catch (err) {
     await log(false, undefined, (err as Error).message);
+    await trace(false, undefined, (err as Error).message);
     throw err;
   }
 }

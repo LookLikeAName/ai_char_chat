@@ -12,6 +12,8 @@ import { proactiveTick } from './proactive/tick.ts';
 import { embedderFromSettings } from './memory/embedder.ts';
 import { extractMemories } from './memory/extract.ts';
 import { reflect } from './memory/reflect.ts';
+import { logEvent, pruneObservability, withScope } from './observability.ts';
+import { setupObservability } from './observabilitySetup.ts';
 import { backfillEmbeddings } from './memory/store.ts';
 import { ReplyEngine } from './reply/engine.ts';
 import { loadSettings } from './services/settings.ts';
@@ -29,6 +31,7 @@ const queue = new Queue<AgentJob>(AGENT_QUEUE, { connection: redis });
 const events = new RedisEventPublisher(redis);
 const lock = new RedisLock(redis);
 const ctx = { db, box };
+setupObservability(db, events, { console: true });
 
 const engine = new ReplyEngine({
   db,
@@ -45,14 +48,16 @@ const engine = new ReplyEngine({
   },
 });
 
-async function handleExtract(avatarId: string, conversationId: string) {
+async function handleExtract(avatarId: string, conversationId: string, force = false) {
   const key = `extract:${avatarId}:${conversationId}`;
   const token = await lock.acquire(key, 5 * 60 * 1000);
   if (!token) return 'busy';
   try {
     const settings = await loadSettings(db);
     const embedder = await embedderFromSettings(db, box, settings);
-    const result = await extractMemories(ctx, settings, embedder, avatarId, conversationId, new Date(), config.memoryIdleMs);
+    const result = await withScope({ avatarId, conversationId }, () =>
+      extractMemories(ctx, settings, embedder, avatarId, conversationId, new Date(), force ? 0 : config.memoryIdleMs),
+    );
     if (embedder) await backfillEmbeddings(db, embedder, avatarId);
     if (result === 'done') await events.publish({ type: 'avatar.state.changed', avatarId });
     return result;
@@ -63,6 +68,7 @@ async function handleExtract(avatarId: string, conversationId: string) {
 
 async function maintenance() {
   const settings = await loadSettings(db);
+  await pruneObservability(db, settings.debug.retentionDays);
   if (!settings.utilityLlm) return;
   const embedder = await embedderFromSettings(db, box, settings).catch(() => null);
   for (const a of await db.select({ id: avatars.id }).from(avatars)) {
@@ -86,7 +92,7 @@ const worker = new Worker<AgentJob>(
         return result;
       }
       case 'memory.extract': {
-        const result = await handleExtract(data.avatarId, data.conversationId);
+        const result = await handleExtract(data.avatarId, data.conversationId, data.force);
         if (result === 'busy') await queue.add('memory.extract', data, { ...MEMORY_JOB_OPTIONS, ...KEEP, delay: 30_000 });
         return result;
       }
@@ -111,6 +117,16 @@ const worker = new Worker<AgentJob>(
 
 worker.on('failed', (job, err) => {
   console.error(`[worker] 工作 ${job?.id}（${job?.data.kind}，第 ${job?.attemptsMade} 次）失敗：`, err.message);
+  const final = !job || job.attemptsMade >= (job.opts.attempts ?? 1);
+  void logEvent({
+    category: 'job',
+    type: 'job.failed',
+    level: final ? 'error' : 'warn',
+    conversationId: job && 'conversationId' in job.data ? job.data.conversationId : null,
+    avatarId: job && 'avatarId' in job.data ? job.data.avatarId : null,
+    message: `工作 ${job?.data.kind ?? '?'} 失敗（第 ${job?.attemptsMade ?? '?'} 次${final ? '，不再重試' : '，稍後重試'}）：${err.message}`,
+    data: { jobId: job?.id, data: job?.data, stack: err.stack?.split('\n').slice(0, 6) },
+  });
   if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
   if (job.data.kind === 'reply') {
     engine.reportFailure(job.data.conversationId, err).catch((e) => console.error('[worker] 無法寫入失敗訊息：', e));

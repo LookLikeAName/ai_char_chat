@@ -94,10 +94,14 @@ export interface RetrieveOptions {
   now?: Date;
   /** 只取這些可見性的記憶；省略表示全部 */
   visibility?: string[];
+  /** 是否更新取用時間（預覽與檢索測試時不更新） */
+  touch?: boolean;
 }
 
 export interface ScoredMemory extends MemoryRow {
   score: number;
+  relevance: number;
+  recency: number;
 }
 
 export async function retrieveMemories(db: Db, embedder: Embedder | null, opts: RetrieveOptions): Promise<ScoredMemory[]> {
@@ -146,11 +150,11 @@ export async function retrieveMemories(db: Db, embedder: Embedder | null, opts: 
     const score =
       WEIGHTS.relevance * relevance + WEIGHTS.recency * recency + WEIGHTS.importance * (m.importance / 10);
     const { similarity: _s, ...row } = m;
-    return { ...row, score };
+    return { ...row, score, relevance, recency };
   });
   scored.sort((a, b) => b.score - a.score);
   const top = scored.slice(0, limit);
-  if (top.length) {
+  if (top.length && opts.touch !== false) {
     await db
       .update(memories)
       .set({ lastAccessedAt: sql`now()` })

@@ -241,6 +241,32 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
+        <h2>除錯</h2>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.debug.captureContext}
+            onChange={(e) => patch({ debug: { ...s.debug, captureContext: e.target.checked } })}
+          />
+          <span>記錄每次 LLM 呼叫的完整 context（system prompt、對話、回應）</span>
+        </label>
+        <label className="field">
+          <span className="field-label">事件與呼叫紀錄保留天數</span>
+          <input
+            type="number"
+            className="narrow-input"
+            min={1}
+            max={90}
+            value={s.debug.retentionDays}
+            onChange={(e) =>
+              patch({ debug: { ...s.debug, retentionDays: Math.max(1, Math.min(90, Math.round(Number(e.target.value) || 1))) } })
+            }
+          />
+          <span className="hint">在左側的「監控」查看。紀錄存在你的伺服器上，不包含 API key。</span>
+        </label>
+      </section>
+
+      <section className="card">
         <h2>用量</h2>
         <label className="field">
           <span className="field-label">每日 token 上限（0 表示不限）</span>

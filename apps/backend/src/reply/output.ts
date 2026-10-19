@@ -10,6 +10,8 @@ export interface ReplyOutput {
   affinityDelta: number;
   trustDelta: number;
   event: { type: RelationshipEventType; note: string } | null;
+  /** 產生這個輸出的 LLM 呼叫（監控用） */
+  traceId?: string | null;
 }
 
 const MAX_MESSAGES = 6;

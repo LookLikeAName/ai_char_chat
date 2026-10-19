@@ -1,7 +1,7 @@
 // WebSocket：收到伺服器事件就更新 React Query 的快取；斷線時自動重連（指數退避，最多 15 秒）。
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ConversationDto, MessageDto, ServerEvent } from '@acc/shared';
+import type { ClientMessage, ConversationDto, DebugEventDto, MessageDto, ServerEvent, TraceSummaryDto } from '@acc/shared';
 import { qk } from './api.ts';
 
 export type WsStatus = 'connecting' | 'open' | 'closed';
@@ -20,6 +20,17 @@ export function useTyping(conversationId: string): string[] {
   return useContext(TypingContext)[conversationId] ?? NO_ONE;
 }
 
+/** 監控頁的即時資料：有人訂閱時才請伺服器送 debug 事件 */
+export type DebugListener = (e: { kind: 'event'; event: DebugEventDto } | { kind: 'trace'; trace: TraceSummaryDto }) => void;
+const DebugContext = createContext<(listener: DebugListener) => () => void>(() => () => {});
+
+export function useDebugStream(listener: DebugListener): void {
+  const subscribe = useContext(DebugContext);
+  const ref = useRef(listener);
+  ref.current = listener;
+  useEffect(() => subscribe((e) => ref.current(e)), [subscribe]);
+}
+
 /** 收不到「停止輸入」事件時（例如 worker 重啟），30 秒後自動清掉 */
 const TYPING_EXPIRE_MS = 30_000;
 
@@ -30,6 +41,25 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<WsStatus>('connecting');
   const [typing, setTypingMap] = useState<TypingMap>({});
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const wsRef = useRef<WebSocket | null>(null);
+  const debugListeners = useRef(new Set<DebugListener>());
+
+  const sendClient = useCallback((m: ClientMessage) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  }, []);
+
+  const subscribeDebug = useCallback(
+    (listener: DebugListener) => {
+      debugListeners.current.add(listener);
+      if (debugListeners.current.size === 1) sendClient({ type: 'subscribe', topics: ['debug'] });
+      return () => {
+        debugListeners.current.delete(listener);
+        if (debugListeners.current.size === 0) sendClient({ type: 'unsubscribe', topics: ['debug'] });
+      };
+    },
+    [sendClient],
+  );
 
   const setTyping = useCallback((conversationId: string, avatarId: string, on: boolean) => {
     const key = `${conversationId}:${avatarId}`;
@@ -92,6 +122,12 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
         case 'profile.changed':
           void qc.invalidateQueries({ queryKey: qk.profile });
           break;
+        case 'debug.event':
+          for (const l of debugListeners.current) l({ kind: 'event', event: e.event });
+          break;
+        case 'debug.trace':
+          for (const l of debugListeners.current) l({ kind: 'trace', trace: e.trace });
+          break;
         case 'hello':
           break;
       }
@@ -101,9 +137,12 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
       setStatus('connecting');
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
+      wsRef.current = ws;
       ws.onopen = () => {
         retry = 0;
         setStatus('open');
+        // 重連後恢復訂閱
+        if (debugListeners.current.size) ws?.send(JSON.stringify({ type: 'subscribe', topics: ['debug'] }));
         // 斷線期間可能漏掉事件，重連後全部重新抓
         void qc.invalidateQueries();
       };
@@ -131,7 +170,9 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
 
   return (
     <WsStatusContext.Provider value={status}>
-      <TypingContext.Provider value={typing}>{children}</TypingContext.Provider>
+      <TypingContext.Provider value={typing}>
+        <DebugContext.Provider value={subscribeDebug}>{children}</DebugContext.Provider>
+      </TypingContext.Provider>
     </WsStatusContext.Provider>
   );
 }

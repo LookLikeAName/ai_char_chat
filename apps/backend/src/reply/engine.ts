@@ -19,6 +19,7 @@ import { getLifeLog } from '../life/lifeLog.ts';
 import type { Lock } from '../lock.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { latestImpression, retrieveMemories } from '../memory/store.ts';
+import { attachParsed, logEvent, withScope } from '../observability.ts';
 import { loadProfile } from '../profile/service.ts';
 import { applyInteraction, getMood, getRelationship, setMood } from '../relationship/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
@@ -75,6 +76,10 @@ export class ReplyEngine {
    * 'early'：還沒到預計看到訊息的時間（之後排定的工作會處理）。force 會忽略預計時間（重試用）。
    */
   async handle(conversationId: string, opts: { force?: boolean } = {}): Promise<'busy' | 'done' | 'early'> {
+    return withScope({ conversationId }, () => this.handleInner(conversationId, opts));
+  }
+
+  private async handleInner(conversationId: string, opts: { force?: boolean }): Promise<'busy' | 'done' | 'early'> {
     const key = `reply:${conversationId}`;
     const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
     if (!token) return 'busy';
@@ -90,7 +95,17 @@ export class ReplyEngine {
         const snapshot = await this.latestUserMessageAt(conversationId);
         if (!snapshot || (ctx.handledUpTo && snapshot <= ctx.handledUpTo)) return 'done';
         const now = this.now();
-        if (round === 0 && !opts.force && ctx.replyDueAt && now.getTime() < ctx.replyDueAt.getTime() - 1000) return 'early';
+        if (round === 0 && !opts.force && ctx.replyDueAt && now.getTime() < ctx.replyDueAt.getTime() - 1000) {
+          await logEvent({
+            category: 'reply',
+            type: 'reply.early',
+            level: 'debug',
+            avatarId: ctx.avatar.id,
+            message: `${ctx.avatar.name}：還沒到預計看到的時間（${ctx.replyDueAt.toISOString()}），先不處理`,
+            data: { dueAt: ctx.replyDueAt.toISOString(), reason: ctx.replyReason },
+          });
+          return 'early';
+        }
 
         if (!ctx.avatar.llm) {
           await this.noticeOnce(
@@ -107,8 +122,34 @@ export class ReplyEngine {
             ? { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) }
             : { mode: 'reply', reason: 'normal' };
         await this.markSeen(ctx, snapshot);
+        await logEvent({
+          category: 'reply',
+          type: 'reply.seen',
+          avatarId: ctx.avatar.id,
+          message: `${ctx.avatar.name} 看到訊息${round === 0 && situation.reason !== 'normal' ? `（${situation.reason}，等了 ${Math.round((situation.waitedMs ?? 0) / 60_000)} 分鐘）` : ''}，開始回覆`,
+          data: { round, situation, forced: !!opts.force },
+        });
         const outcome = await this.generateAndSend(ctx, snapshot, setTyping, situation);
-        if (outcome.kind === 'restart') continue;
+        if (outcome.kind === 'restart') {
+          await logEvent({
+            category: 'reply',
+            type: 'reply.restart',
+            avatarId: ctx.avatar.id,
+            message: `${ctx.avatar.name}：玩家在回覆送出前又傳了訊息，整輪重來`,
+          });
+          continue;
+        }
+        await logEvent({
+          category: 'reply',
+          type: outcome.kind === 'sent' ? 'reply.sent' : 'reply.interrupted',
+          avatarId: ctx.avatar.id,
+          traceId: outcome.output.traceId,
+          message:
+            outcome.kind === 'sent'
+              ? `${ctx.avatar.name} 回了 ${outcome.output.messages.length} 則`
+              : `${ctx.avatar.name}：送出途中玩家插話，停在這裡，下一輪回新訊息`,
+          data: { messages: outcome.output.messages },
+        });
         await this.markHandled(ctx, snapshot);
         await this.applyState(ctx, outcome.output);
         await this.deps.onReplied?.(ctx.avatar.id, ctx.conversationId);
@@ -125,6 +166,10 @@ export class ReplyEngine {
    * 回傳 'sent' 時，至少送出了一則。
    */
   async handleProactive(conversationId: string): Promise<'busy' | 'skipped' | 'sent'> {
+    return withScope({ conversationId }, () => this.handleProactiveInner(conversationId));
+  }
+
+  private async handleProactiveInner(conversationId: string): Promise<'busy' | 'skipped' | 'sent'> {
     const key = `reply:${conversationId}`;
     const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
     if (!token) return 'busy';
@@ -141,7 +186,16 @@ export class ReplyEngine {
 
       const startedAt = this.now();
       const output = await this.generate(ctx, { mode: 'proactive' });
-      if (!output.messages.length) return 'skipped';
+      if (!output.messages.length) {
+        await logEvent({
+          category: 'proactive',
+          type: 'proactive.silent',
+          avatarId: ctx.avatar.id,
+          traceId: output.traceId,
+          message: `${ctx.avatar.name} 想了想，這次決定不傳訊息`,
+        });
+        return 'skipped';
+      }
       let sent = 0;
       for (const [i, text] of output.messages.entries()) {
         await setTyping(ctx.avatar.id, true);
@@ -153,13 +207,25 @@ export class ReplyEngine {
           senderType: 'avatar',
           senderAvatarId: ctx.avatar.id,
           content: text,
-          meta: { proactive: true, ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}) },
+          meta: {
+            proactive: true,
+            ...(output.traceId ? { traceId: output.traceId } : {}),
+            ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}),
+          },
         });
         sent++;
         await setTyping(ctx.avatar.id, false);
         if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
       }
       if (!sent) return 'skipped';
+      await logEvent({
+        category: 'proactive',
+        type: 'proactive.sent',
+        avatarId: ctx.avatar.id,
+        traceId: output.traceId,
+        message: `${ctx.avatar.name} 主動傳了 ${sent} 則訊息`,
+        data: { messages: output.messages.slice(0, sent) },
+      });
       await this.bumpProactiveCount(ctx.avatar.id);
       await this.applyState(ctx, output);
       await this.deps.onReplied?.(ctx.avatar.id, conversationId);
@@ -243,7 +309,10 @@ export class ReplyEngine {
         senderType: 'avatar',
         senderAvatarId: avatarId,
         content: text,
-        meta: i === 0 && output.innerThought ? { innerThought: output.innerThought } : {},
+        meta: {
+          ...(output.traceId ? { traceId: output.traceId } : {}),
+          ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}),
+        },
       });
       await setTyping(avatarId, false);
       if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
@@ -263,10 +332,34 @@ export class ReplyEngine {
       warmUp,
     );
     const changed = output.mood || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
-    if (changed) await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
+    if (changed) {
+      await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
+      const parts = [
+        output.mood ? `心情：${output.mood.label}` : '',
+        before.affinity !== after.affinity ? `好感 ${before.affinity} → ${after.affinity}` : '',
+        before.trust !== after.trust ? `信任 ${before.trust} → ${after.trust}` : '',
+        before.stage !== after.stage ? `關係 ${before.stage} → ${after.stage}` : '',
+        output.event ? `事件：${output.event.type}` : '',
+      ].filter(Boolean);
+      await logEvent({
+        category: 'state',
+        type: before.stage !== after.stage ? 'state.stage' : 'state.updated',
+        avatarId: ctx.avatar.id,
+        traceId: output.traceId,
+        message: `${ctx.avatar.name}：${parts.join('、')}`,
+        data: {
+          mood: output.mood,
+          requested: { affinity: output.affinityDelta, trust: output.trustDelta, event: output.event },
+          before,
+          after,
+          warmUp,
+        },
+      });
+    }
   }
 
-  private async generate(ctx: Ctx, situation: PromptSituation): Promise<ReplyOutput> {
+  /** 組出 prompt（不呼叫 LLM）；回覆、主動發話與監控頁的預覽共用 */
+  private async buildPrompt(ctx: Ctx, situation: PromptSituation, opts: { preview?: boolean } = {}) {
     const settings: AppSettings = await loadSettings(this.deps.db);
     const db = this.deps.db;
     const history = await this.loadHistory(ctx.conversationId);
@@ -283,7 +376,15 @@ export class ReplyEngine {
       .slice(-4)
       .map((m) => m.content)
       .join('\n');
-    const memories = await retrieveMemories(db, embedder, { avatarId: ctx.avatar.id, query, now });
+    const memories = await retrieveMemories(db, embedder, { avatarId: ctx.avatar.id, query, now, touch: !opts.preview });
+    if (!opts.preview) await logEvent({
+      category: 'memory',
+      type: 'memory.retrieve',
+      level: 'debug',
+      avatarId: ctx.avatar.id,
+      message: `${ctx.avatar.name}：想起 ${memories.length} 件記憶${embedder ? '' : '（沒有嵌入模型，用關鍵字比對）'}`,
+      data: { query, memories: memories.map((m) => ({ content: m.content, score: Math.round(m.score * 1000) / 1000 })) },
+    });
     const lifeLog = await getLifeLog(db, ctx.avatar.id, localClock(now, settings.timezone).date);
     const { system, messages: built } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
@@ -315,6 +416,39 @@ export class ReplyEngine {
           ]
         : built;
     const allowEmpty = situation.mode === 'proactive';
+    return {
+      system,
+      chat,
+      settings,
+      allowEmpty,
+      notes: {
+        situation,
+        relationship: { stage: relationship.stage, affinity: relationship.affinity, trust: relationship.trust },
+        mood,
+        memories: memories.length,
+        embedder: embedder?.model ?? null,
+        lifeLog: lifeLog?.length ?? 0,
+        historyMessages: history.length,
+        disclosure: profile.preferences ? relationship.stage : 'no-profile',
+      },
+    };
+  }
+
+  /** 監控頁：如果現在回覆（或主動發話），會送出什麼 */
+  async previewPrompt(conversationId: string, mode: 'reply' | 'proactive') {
+    const ctx = await this.loadContext(conversationId);
+    if (!ctx) return null;
+    const now = this.now();
+    const situation: PromptSituation =
+      mode === 'proactive'
+        ? { mode: 'proactive' }
+        : { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) };
+    const { system, chat, notes } = await this.buildPrompt(ctx, situation, { preview: true });
+    return { system, messages: chat, notes: { ...notes, avatar: ctx.avatar.name, llm: ctx.avatar.llm } };
+  }
+
+  private async generate(ctx: Ctx, situation: PromptSituation): Promise<ReplyOutput> {
+    const { system, chat, settings, allowEmpty } = await this.buildPrompt(ctx, situation);
     const call = (extra: typeof chat = []) =>
       callWithBinding(
         this.deps,
@@ -325,7 +459,18 @@ export class ReplyEngine {
 
     const first = await call();
     const parsed = parseReplyOutput(first.text, { allowEmpty });
-    if (parsed) return parsed;
+    if (parsed) {
+      await attachParsed(first.traceId, parsed);
+      return { ...parsed, traceId: first.traceId };
+    }
+    await logEvent({
+      category: 'llm',
+      type: 'llm.format',
+      level: 'warn',
+      avatarId: ctx.avatar.id,
+      traceId: first.traceId,
+      message: `${ctx.avatar.name}：模型的輸出不是指定的 JSON，提醒後重試`,
+    });
     // 格式不對：提醒一次再試
     const second = await call([
       { role: 'assistant', content: first.text },
@@ -334,7 +479,8 @@ export class ReplyEngine {
     const output =
       parseReplyOutput(second.text, { allowEmpty }) ?? plainTextFallback(first.text) ?? plainTextFallback(second.text);
     if (!output) throw new Error(`模型的輸出無法解析：${first.text.slice(0, 120)}`);
-    return output;
+    await attachParsed(second.traceId, output);
+    return { ...output, traceId: second.traceId };
   }
 
   private async loadContext(conversationId: string): Promise<Ctx | null> {

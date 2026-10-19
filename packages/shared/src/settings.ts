@@ -32,6 +32,10 @@ export const appSettingsSchema = z.object({
     .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
     .nullable()
     .default(null),
+  /** 除錯：記錄每次 LLM 呼叫的完整 context；事件與紀錄保留天數 */
+  debug: z
+    .object({ captureContext: z.boolean(), retentionDays: z.number().int().min(1).max(90) })
+    .default({ captureContext: true, retentionDays: 7 }),
   /** 全域每日 token 上限；0 表示不限 */
   dailyTokenLimit: z.number().int().min(0).default(0),
 });

@@ -32,6 +32,9 @@ export function Rail() {
         </NavLink>
       ))}
       <div className="rail-spacer" />
+      <NavLink to="/monitor" className="rail-btn" title="監控" aria-label="監控">
+        <Icon name="pulse" size={22} />
+      </NavLink>
       <span
         className={`ws-dot ws-${ws}`}
         title={ws === 'open' ? '已連線' : ws === 'connecting' ? '連線中…' : '已斷線，重新連線中'}

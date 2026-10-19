@@ -14,6 +14,10 @@ export interface MessageDto {
   innerThought: string | null;
   /** 系統訊息的種類：error 會在介面上提供「重試」 */
   systemKind: 'error' | 'notice' | null;
+  /** 產生這則訊息的 LLM 呼叫（監控頁可以查看完整 context） */
+  traceId: string | null;
+  /** avatar 主動傳的 */
+  proactive: boolean;
 }
 
 export interface ConversationDto {

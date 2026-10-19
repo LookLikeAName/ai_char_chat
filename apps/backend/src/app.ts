@@ -14,6 +14,7 @@ import type { FetchFn } from './llm/index.ts';
 import { avatarRoutes } from './routes/avatars.ts';
 import { avatarStateRoutes } from './routes/avatarState.ts';
 import { conversationRoutes } from './routes/conversations.ts';
+import { debugRoutes, type QueueInspector } from './routes/debug.ts';
 import { healthRoutes } from './routes/health.ts';
 import { llmProfileRoutes } from './routes/llmProfiles.ts';
 import { profileRoutes } from './routes/profile.ts';
@@ -27,6 +28,8 @@ export interface AppDeps {
   jobs: JobQueue;
   /** 健康檢查用；測試時可省略 */
   redis?: Redis;
+  /** 監控頁的佇列操作；測試時可省略 */
+  queue?: QueueInspector;
   hub: WsHub;
   mediaDir: string;
   fetchFn?: FetchFn;
@@ -69,6 +72,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(avatarStateRoutes);
       await api.register(conversationRoutes);
       await api.register(profileRoutes);
+      await api.register(debugRoutes);
     },
     { prefix: '/api' },
   );

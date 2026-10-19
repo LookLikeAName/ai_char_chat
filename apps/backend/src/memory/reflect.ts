@@ -5,6 +5,7 @@ import type { Db } from '../db/client.ts';
 import { avatars, avatarState, memories } from '../db/schema.ts';
 import { callUtility } from '../persona/utility.ts';
 import { getMood, getRelationship } from '../relationship/service.ts';
+import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
 import type { Embedder } from './embedder.ts';
 import { addMemories, latestImpression } from './store.ts';
@@ -60,6 +61,13 @@ ${fresh.map((m) => `- ${m.content}`).join('\n')}
   const impression = text.trim().slice(0, 1000);
   if (!impression) return false;
   await addMemories(db, embedder, [{ avatarId, kind: 'impression', content: impression, importance: 8 }]);
+  await logEvent({
+    category: 'memory',
+    type: 'memory.reflect',
+    avatarId,
+    message: `${avatar.name}：整合 ${fresh.length} 件新記憶，更新了對玩家的印象`,
+    data: { impression },
+  });
   await db
     .insert(avatarState)
     .values({ avatarId, mood, reflectedAt: now })

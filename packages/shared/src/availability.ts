@@ -79,6 +79,14 @@ export const PACING_LABELS: Record<ReplyPacing, string> = {
 
 export type SeenReason = 'normal' | 'peek' | 'late' | 'interrupted' | 'woken';
 
+export const SEEN_REASON_LABELS: Record<SeenReason, string> = {
+  normal: '一般',
+  peek: '偷看手機',
+  late: '忙完／起床才看',
+  interrupted: '被催促打斷',
+  woken: '被吵醒',
+};
+
 export interface SeenPlan {
   /** 什麼時候「看到」訊息 */
   at: Date;

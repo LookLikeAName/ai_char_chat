@@ -1,6 +1,7 @@
 // 資訊面板的動態狀態：心情、關係、印象、記憶。
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import {
   EVENT_LABELS,
   INITIAL_STAGES,
@@ -187,6 +188,12 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
             {showAll ? '收起' : `顯示全部 ${state.memories.length} 件`}
           </button>
         )}
+      </dd>
+      <dt>除錯</dt>
+      <dd>
+        <Link className="hint" to="/monitor/events">
+          在監控頁查看事件與 LLM 呼叫 →
+        </Link>
       </dd>
     </dl>
   );

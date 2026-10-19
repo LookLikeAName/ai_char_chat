@@ -16,6 +16,8 @@ export function messageToDto(m: MessageRow): MessageDto {
     createdAt: m.createdAt.toISOString(),
     innerThought: m.meta.innerThought ?? null,
     systemKind: m.meta.systemKind ?? null,
+    traceId: m.meta.traceId ?? null,
+    proactive: !!m.meta.proactive,
   };
 }
 

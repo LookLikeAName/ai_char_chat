@@ -6,6 +6,7 @@ import { avatars, avatarState, conversationMembers, conversations, messages } fr
 import type { AgentJob } from '../jobs.ts';
 import { ensureLifeLog } from '../life/lifeLog.ts';
 import { getRelationship } from '../relationship/service.ts';
+import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
 
 /** 焦慮型依附的角色，上一則主動訊息沒被回、而且過了這麼久，會再追一則 */
@@ -96,5 +97,18 @@ export async function proactiveTick(
     await enqueue({ kind: 'proactive', avatarId: avatar.id, conversationId }, Math.round(random() * SPREAD_MS));
     decisions.push({ avatarId: avatar.id, action: 'enqueued', reason: '決定主動傳訊息', chance });
   }
+  await logEvent({
+    category: 'proactive',
+    type: 'proactive.tick',
+    level: decisions.some((d) => d.action === 'enqueued') ? 'info' : 'debug',
+    message: `主動發話檢查：${decisions.filter((d) => d.action === 'enqueued').length} / ${decisions.length} 個 avatar 決定傳訊息`,
+    data: {
+      decisions: decisions.map((d) => ({
+        ...d,
+        name: rows.find((r) => r.avatar.id === d.avatarId)?.avatar.name,
+        chance: d.chance === undefined ? undefined : Math.round(d.chance * 1000) / 1000,
+      })),
+    },
+  });
   return decisions;
 }
