@@ -3182,3 +3182,12 @@ fieldset.field {
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
+
+.param-choice {
+  flex-wrap: wrap;
+}
+
+.param-choice select {
+  width: auto;
+  min-width: 180px;
+}

@@ -1,4 +1,5 @@
 // Gemini API（generateContent）：https://ai.google.dev/api/generate-content
+import { geminiThinkingConfig } from '@acc/shared';
 import { partsOf } from '../content.ts';
 import { alternate, requestJson, requestSignal, trimSlash } from '../http.ts';
 import { LlmError, type ProviderAdapter } from '../types.ts';
@@ -38,6 +39,7 @@ export const googleAdapter: ProviderAdapter = {
         presencePenalty: p.presencePenalty,
         frequencyPenalty: p.frequencyPenalty,
         responseMimeType: req.json ? 'application/json' : undefined,
+        thinkingConfig: geminiThinkingConfig(llm.model, p.thinking),
       },
       safetySettings: req.relaxedSafety
         ? SAFETY_CATEGORIES.map((category) => ({ category, threshold: 'BLOCK_NONE' }))

@@ -320,6 +320,7 @@ prompt 依序組成：
 - **設定檔**：供應商類型、Base URL、API key、模型、參數預設值。API key 以 `APP_SECRET` 加密存放，API 只回傳「是否已設定」與最後 4 碼。
 - **綁定**：avatar 與系統工具模型各自選一個設定檔，再勾選要覆寫的參數。沒勾選的參數沿用設定檔；設定檔也沒填的，就用供應商預設值。
 - 可覆寫的參數：temperature、top P、最大輸出 tokens、presence／frequency penalty；供應商不支援的參數會在呼叫時略過（例如 Anthropic 沒有 penalty）。
+- **思考程度**（只有 Google Gemini）：讓模型自己決定、最少、低、中、高，一樣可以在設定檔設預設值、在 avatar 覆寫。依模型換算（`geminiThinkingConfig`）：Gemini 3 以後送 `thinkingLevel`（Gemini 3 Pro 只有 low／high，其他等級換成最接近的；「讓模型自己決定」不送）；Gemini 2.5 送 `thinkingBudget`（最少：Flash 0＝不思考、Pro 128；低 1024；中 8192；高：Flash 24576、Pro 32768；自己決定 -1）；2.0、1.5、Gemma 不送。兩個欄位不會同時送。思考的 tokens 算在輸出用量裡。
 - 改設定檔（例如換模型、換 key）會立刻套用到所有綁定它的 avatar；被綁定中的設定檔不能刪除。
 - 設定頁可以「取得模型清單」與「測試連線」；avatar 頁可以用自己的覆寫參數測試。
 - 類型：Google Gemini、Anthropic、OpenAI、OpenAI 相容端點（OpenRouter、DeepSeek、Ollama、LM Studio、vLLM…）。

@@ -247,7 +247,7 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
       <section className="card">
         <h2>參數預設值</h2>
         <p className="hint">綁定這個設定檔的 avatar 都會沿用這些值，avatar 可以各自覆寫。沒勾選的參數使用供應商預設。</p>
-        <ParamEditor provider={f.provider} value={f.defaults} onChange={(defaults) => patch({ defaults })} inheritLabel="" />
+        <ParamEditor provider={f.provider} model={f.model} value={f.defaults} onChange={(defaults) => patch({ defaults })} inheritLabel="" />
         <div className="row">
           <button type="button" className="btn" onClick={runTest} disabled={!f.model || (!!test && 'pending' in test)}>
             測試連線

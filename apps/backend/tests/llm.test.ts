@@ -65,6 +65,20 @@ describe('Gemini', () => {
     expect(c.body.safetySettings).toHaveLength(4);
   });
 
+  it('思考程度：Gemini 3 送 thinkingLevel、2.5 送 thinkingBudget；其他供應商不送', async () => {
+    const { fetchFn, calls } = fakeFetch({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] });
+    await complete({ ...llm, model: 'gemini-3-flash-preview' }, { messages, params: { thinking: 'low' } }, fetchFn);
+    await complete({ ...llm, model: 'gemini-2.5-flash' }, { messages, params: { thinking: 'minimal' } }, fetchFn);
+    await complete(llm, { messages, params: {} }, fetchFn);
+    expect(calls[0]!.body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+    expect(calls[1]!.body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+    expect(calls[2]!.body.generationConfig.thinkingConfig).toBeUndefined();
+
+    const openai = fakeFetch({ choices: [{ message: { content: 'ok' } }] });
+    await complete({ provider: 'openai', baseUrl: 'https://o', model: 'gpt-4o' }, { messages, params: { thinking: 'high' } }, openai.fetchFn);
+    expect(JSON.stringify(openai.calls[0]!.body)).not.toContain('thinking');
+  });
+
   it('被擋下時回報原因', async () => {
     const { fetchFn } = fakeFetch({ promptFeedback: { blockReason: 'SAFETY' } });
     await expect(complete(llm, { messages, params: {} }, fetchFn)).rejects.toThrow(/SAFETY/);

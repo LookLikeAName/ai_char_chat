@@ -62,6 +62,7 @@ export function LlmBindingEditor({ value, onChange, allowNone = true }: Props) {
           <p className="hint">勾選的參數會覆寫設定檔的值；沒勾選的沿用設定檔「{profile.name}」。</p>
           <ParamEditor
             provider={profile.provider}
+            model={profile.model}
             value={value.params}
             onChange={(params) => onChange({ ...value, params })}
             inherited={profile.defaults}
