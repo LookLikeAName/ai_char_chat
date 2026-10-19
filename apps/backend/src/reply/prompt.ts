@@ -75,6 +75,8 @@ export interface PromptAcquaintance {
   bio: string;
   occupation?: string;
   traits?: string[];
+  /** 你對他現在的關係（會隨互動變化） */
+  stage?: Stage;
 }
 
 /** 玩家的 profile；還沒填偏好問卷時為 null */
@@ -292,7 +294,7 @@ function acquaintanceSection(list: PromptAcquaintance[] | undefined, group: Prom
   if (!others.length) return '';
   const lines = others.map((a) => {
     const about = [a.occupation, a.traits?.length ? a.traits.join('、') : ''].filter(Boolean).join('；');
-    return `- ${a.name}：${a.relation}${a.bio ? `\n  ${a.bio}` : ''}${about ? `（${about}）` : ''}`;
+    return `- ${a.name}：${a.relation}${a.stage ? `（你們現在：${STAGE_LABELS[a.stage]}）` : ''}${a.bio ? `\n  ${a.bio}` : ''}${about ? `（${about}）` : ''}`;
   });
   return `
 ## 你生活裡認識的人

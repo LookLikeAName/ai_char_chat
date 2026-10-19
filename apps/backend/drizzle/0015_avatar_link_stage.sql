@@ -1,0 +1,1 @@
+ALTER TABLE "avatar_links" ADD COLUMN "stage" text DEFAULT 'acquaintance' NOT NULL;

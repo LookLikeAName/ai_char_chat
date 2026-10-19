@@ -1,11 +1,11 @@
 // 相關的角色（例如同一間公司的同事）：存成無方向的一對，關係描述雙方共用。
 // 用在三個地方：產生／檢查人格設定時當參考、聊天時讓 avatar 知道自己認識誰、群組成員列表。
 import { eq, inArray, or } from 'drizzle-orm';
-import type { AvatarLink, PersonaDraft } from '@acc/shared';
+import { STAGE_LABELS, type AvatarLink, type InitialStage, type PersonaDraft } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatarLinks, avatars } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
-import { getRelationship } from '../relationship/service.ts';
+import { resetRelationship } from '../relationship/service.ts';
 
 const pair = (x: string, y: string) => (x < y ? { aId: x, bId: y } : { aId: y, bId: x });
 
@@ -18,8 +18,8 @@ export async function loadLinks(db: Db, avatarIds?: string[]): Promise<Map<strin
   const out = new Map<string, AvatarLink[]>();
   const push = (id: string, link: AvatarLink) => out.set(id, [...(out.get(id) ?? []), link]);
   for (const r of rows) {
-    push(r.aId, { avatarId: r.bId, relation: r.relation });
-    push(r.bId, { avatarId: r.aId, relation: r.relation });
+    push(r.aId, { avatarId: r.bId, relation: r.relation, stage: r.stage });
+    push(r.bId, { avatarId: r.aId, relation: r.relation, stage: r.stage });
   }
   return out;
 }
@@ -32,19 +32,26 @@ export async function assertLinkTargets(db: Db, links: AvatarLink[]): Promise<vo
   if (found.length !== ids.length) throw new HttpError(400, '相關的角色裡有不存在的 avatar');
 }
 
-/** 整份取代這個 avatar 的相關角色；兩個 avatar 之間也建立關係（第一次當作認識） */
+/**
+ * 整份取代這個 avatar 的相關角色。新的關聯、或改了一開始的關係時，
+ * 兩個 avatar 之間（雙向）的關係重設成那個階段；只改描述不會動到已經累積的好感。
+ */
 export async function saveLinks(db: Db, avatarId: string, links: AvatarLink[]): Promise<void> {
-  const wanted = new Map(links.filter((l) => l.avatarId !== avatarId).map((l) => [l.avatarId, l.relation]));
-  await assertLinkTargets(db, [...wanted.keys()].map((avatarId) => ({ avatarId, relation: '' })));
+  const wanted = new Map(
+    links.filter((l) => l.avatarId !== avatarId).map((l) => [l.avatarId, { relation: l.relation, stage: l.stage ?? 'acquaintance' }]),
+  );
+  await assertLinkTargets(db, [...wanted.keys()].map((id) => ({ avatarId: id, relation: '', stage: 'acquaintance' })));
+  const before = (await loadLinks(db, [avatarId])).get(avatarId) ?? [];
   await db.transaction(async (tx) => {
     await tx.delete(avatarLinks).where(or(eq(avatarLinks.aId, avatarId), eq(avatarLinks.bId, avatarId)));
     if (wanted.size) {
-      await tx.insert(avatarLinks).values([...wanted].map(([other, relation]) => ({ ...pair(avatarId, other), relation })));
+      await tx.insert(avatarLinks).values([...wanted].map(([other, l]) => ({ ...pair(avatarId, other), ...l })));
     }
   });
-  for (const other of wanted.keys()) {
-    await getRelationship(db, avatarId, `avatar:${other}`, 'acquaintance');
-    await getRelationship(db, other, `avatar:${avatarId}`, 'acquaintance');
+  for (const [other, { stage }] of wanted) {
+    if (before.find((b) => b.avatarId === other)?.stage === stage) continue;
+    await resetRelationship(db, avatarId, stage, `avatar:${other}`);
+    await resetRelationship(db, other, stage, `avatar:${avatarId}`);
   }
 }
 
@@ -54,6 +61,7 @@ export interface LinkedAvatar {
   bio: string;
   persona: PersonaDraft;
   relation: string;
+  stage: InitialStage;
 }
 
 export async function linkedAvatars(db: Db, links: AvatarLink[]): Promise<LinkedAvatar[]> {
@@ -64,7 +72,7 @@ export async function linkedAvatars(db: Db, links: AvatarLink[]): Promise<Linked
     .where(inArray(avatars.id, links.map((l) => l.avatarId)));
   return links.flatMap((l) => {
     const a = rows.find((r) => r.id === l.avatarId);
-    return a ? [{ ...a, relation: l.relation }] : [];
+    return a ? [{ ...a, relation: l.relation, stage: l.stage }] : [];
   });
 }
 
@@ -73,7 +81,7 @@ export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full'): strin
   const p = a.persona;
   const b = p.basic ?? {};
   const head = [b.age ? `${b.age} 歲` : '', b.gender ?? '', b.occupation ?? ''].filter(Boolean).join('、');
-  const lines = [`### ${a.name}${head ? `（${head}）` : ''}`, `你們的關係：${a.relation}`, a.bio ? `簡介：${a.bio}` : ''];
+  const lines = [`### ${a.name}${head ? `（${head}）` : ''}`, `你們的關係：${a.relation}（${STAGE_LABELS[a.stage]}）`, a.bio ? `簡介：${a.bio}` : ''];
   if (detail === 'full') {
     const day = p.routine?.schedule?.weekday?.map((s) => `${s.start}–${s.end} ${s.activity}`).join('；');
     lines.push(

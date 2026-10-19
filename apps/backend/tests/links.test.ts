@@ -115,16 +115,34 @@ describe.skipIf(!url)('相關的角色', () => {
       bio: '設計師',
       links: [
         { avatarId: a.id, relation: '同一間設計公司的同事，林小雨是阿哲的主管' },
-        { avatarId: b.id, relation: '大學室友' },
+        { avatarId: b.id, relation: '大學室友', stage: 'close' },
       ],
     });
     expect(status).toBe(201);
     expect(c.links).toHaveLength(2);
-    expect((await get(a.id)).links).toEqual([{ avatarId: c.id, relation: '同一間設計公司的同事，林小雨是阿哲的主管' }]);
+    expect((await get(a.id)).links).toEqual([{ avatarId: c.id, relation: '同一間設計公司的同事，林小雨是阿哲的主管', stage: 'acquaintance' }]);
     const list = (await app.inject({ method: 'GET', url: '/api/avatars' })).json() as AvatarDto[];
-    expect(list.find((x) => x.id === b.id)!.links).toEqual([{ avatarId: c.id, relation: '大學室友' }]);
-    const rels = await db.select().from(relationships).where(eq(relationships.target, `avatar:${c.id}`));
-    expect(rels.map((r) => r.stage)).toEqual(['acquaintance', 'acquaintance']);
+    expect(list.find((x) => x.id === b.id)!.links).toEqual([{ avatarId: c.id, relation: '大學室友', stage: 'close' }]);
+    const stageOf = async (from: string, to: string) =>
+      (await db.select().from(relationships).where(and(eq(relationships.avatarId, from), eq(relationships.target, `avatar:${to}`))))[0];
+    expect((await stageOf(a.id, c.id))!.stage).toBe('acquaintance');
+    expect((await stageOf(c.id, b.id))).toMatchObject({ stage: 'close', affinity: 60, trust: 55 });
+    expect((await stageOf(b.id, c.id))!.stage).toBe('close');
+  });
+
+  it('只改關係的描述不會重設累積的好感；改了一開始的關係才會', async () => {
+    const { body: a } = await create({ name: '林小雨', bio: '' });
+    const { body: c } = await create({ name: '阿哲', bio: '', links: [{ avatarId: a.id, relation: '同事', stage: 'friend' }] });
+    const rel = () => db.select().from(relationships).where(and(eq(relationships.avatarId, c.id), eq(relationships.target, `avatar:${a.id}`)));
+    await db.update(relationships).set({ affinity: 77 }).where(and(eq(relationships.avatarId, c.id), eq(relationships.target, `avatar:${a.id}`)));
+    const put = (links: unknown) => app.inject({ method: 'PUT', url: `/api/avatars/${c.id}`, payload: { name: '阿哲', bio: '', links } });
+    await put([{ avatarId: a.id, relation: '同一個部門的同事', stage: 'friend' }]);
+    expect((await rel())[0]!.affinity).toBe(77);
+    // 從對方那邊儲存（看到的是同一筆）也一樣
+    await app.inject({ method: 'PUT', url: `/api/avatars/${a.id}`, payload: { name: '林小雨', bio: '', links: (await get(a.id)).links } });
+    expect((await rel())[0]!.affinity).toBe(77);
+    await put([{ avatarId: a.id, relation: '同一個部門的同事', stage: 'close' }]);
+    expect((await rel())[0]).toMatchObject({ stage: 'close', affinity: 60 });
   });
 
   it('更新時整份取代；省略 links 時不變；不存在的 avatar 會被拒絕而且不會建立', async () => {
@@ -133,9 +151,9 @@ describe.skipIf(!url)('相關的角色', () => {
     const { body: c } = await create({ name: '阿哲', bio: '', links: [{ avatarId: a.id, relation: '同事' }] });
 
     const put = (payload: Record<string, unknown>) => app.inject({ method: 'PUT', url: `/api/avatars/${c.id}`, payload: { name: '阿哲', bio: '', ...payload } });
-    expect((await put({})).json().links).toEqual([{ avatarId: a.id, relation: '同事' }]);
+    expect((await put({})).json().links).toEqual([{ avatarId: a.id, relation: '同事', stage: 'acquaintance' }]);
     expect((await put({ links: [{ avatarId: b.id, relation: '室友' }, { avatarId: c.id, relation: '自己' }] })).json().links).toEqual([
-      { avatarId: b.id, relation: '室友' },
+      { avatarId: b.id, relation: '室友', stage: 'acquaintance' },
     ]);
     expect((await get(a.id)).links).toEqual([]);
 
@@ -155,29 +173,32 @@ describe.skipIf(!url)('相關的角色', () => {
     const { body: a } = await create({ name: '林小雨', bio: '設計總監', persona: SAMPLE_PERSONA });
     const settings = appSettingsSchema.parse({ utilityLlm: { profileId, params: {} } });
     const ctx = { db, box: new SecretBox('test-secret-0123456789'), fetchFn: fetchFn as never };
-    const references = [{ avatarId: a.id, relation: '同一間設計公司的同事' }];
+    const references = [{ avatarId: a.id, relation: '同一間設計公司的同事', stage: 'friend' as const }];
 
-    await generatePersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references, only: ['basic.age'] });
+    await generatePersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references, only: ['basic.age'], userStage: 'close' });
     expect(calls[0]).toContain('# 相關的角色（已經存在，新的設定要和他們一致）');
     expect(calls[0]).toContain('### 林小雨');
-    expect(calls[0]).toContain('你們的關係：同一間設計公司的同事');
+    expect(calls[0]).toContain('你們的關係：同一間設計公司的同事（朋友）');
+    expect(calls[0]).toContain('和玩家的關係：好友（');
     expect(calls[0]).toContain(`住在：${SAMPLE_PERSONA.basic.location}`);
     expect(calls[0]).toContain('# 和相關的角色');
 
-    await checkPersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references });
+    await checkPersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references, userStage: 'friend' });
     expect(calls.at(-1)).toContain('### 林小雨');
+    expect(calls.at(-1)).toContain('和玩家目前的關係：朋友');
     expect(calls.at(-1)).toContain('也要檢查和相關的角色有沒有對不上的地方');
 
     calls.length = 0;
     await generatePersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references: [], only: ['basic.age'] });
     expect(calls[0]).not.toContain('相關的角色');
+    expect(calls[0]).not.toContain('和玩家的關係：');
   });
 
   it('聊天時：一對一列出認識的人，群組成員旁邊寫出關係', async () => {
     const { body: a } = await create({ name: '林小雨', bio: '設計總監' });
     const { body: b } = await create({ name: '阿哲', bio: '設計師', links: [{ avatarId: a.id, relation: '同一間設計公司的同事' }] });
     const dm = (await app.inject({ method: 'GET', url: `/api/debug/preview/${b.dmConversationId}` })).json();
-    expect(dm.system).toContain('## 你生活裡認識的人\n- 林小雨：同一間設計公司的同事\n  設計總監');
+    expect(dm.system).toContain('## 你生活裡認識的人\n- 林小雨：同一間設計公司的同事（你們現在：認識）\n  設計總監');
 
     const g = await app.inject({ method: 'POST', url: '/api/conversations', payload: { title: '公司', avatarIds: [a.id, b.id] } });
     expect(g.statusCode).toBe(201);
@@ -188,21 +209,22 @@ describe.skipIf(!url)('相關的角色', () => {
 
   it('匯出全部再匯入時保留一起匯出的 avatar 之間的關聯', async () => {
     const { body: a } = await create({ name: '林小雨', bio: '' });
-    const { body: b } = await create({ name: '阿哲', bio: '', links: [{ avatarId: a.id, relation: '同事' }] });
+    const { body: b } = await create({ name: '阿哲', bio: '', links: [{ avatarId: a.id, relation: '同事', stage: 'friend' }] });
     const file = (await app.inject({ method: 'GET', url: '/api/avatars/export' })).json() as TransferFile;
-    expect(file.avatars[0]!.links).toEqual([{ index: 1, relation: '同事' }]);
-    expect(file.avatars[1]!.links).toEqual([{ index: 0, relation: '同事' }]);
+    expect(file.avatars[0]!.links).toEqual([{ index: 1, relation: '同事', stage: 'friend' }]);
+    expect(file.avatars[1]!.links).toEqual([{ index: 0, relation: '同事', stage: 'friend' }]);
 
     const res = await app.inject({ method: 'POST', url: '/api/avatars/import', payload: { file, profileId: null, include: { memories: false, history: false } } });
     expect(res.statusCode).toBe(200);
     const [x, y] = (res.json() as ImportResultDto).avatars;
-    expect((await get(x!.id)).links).toEqual([{ avatarId: y!.id, relation: '同事' }]);
-    expect((await get(y!.id)).links).toEqual([{ avatarId: x!.id, relation: '同事' }]);
+    expect((await get(x!.id)).links).toEqual([{ avatarId: y!.id, relation: '同事', stage: 'friend' }]);
+    expect((await get(y!.id)).links).toEqual([{ avatarId: x!.id, relation: '同事', stage: 'friend' }]);
     const rel = await db
       .select()
       .from(relationships)
       .where(and(eq(relationships.avatarId, x!.id), eq(relationships.target, `avatar:${y!.id}`)));
     expect(rel).toHaveLength(1);
+    expect(rel[0]!.stage).toBe('friend');
     // 原本的那一對還在，總共兩對
     expect(await db.select().from(avatarLinks)).toHaveLength(2);
     expect(b.links).toHaveLength(1);

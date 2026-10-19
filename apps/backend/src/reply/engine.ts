@@ -22,7 +22,7 @@ import {
 } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
-import { avatars, avatarState, conversationMembers, conversations, messages } from '../db/schema.ts';
+import { avatars, avatarState, conversationMembers, conversations, messages, relationships } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
 import { loggedContent } from '../llm/content.ts';
 import type { FetchFn } from '../llm/index.ts';
@@ -734,6 +734,12 @@ export class ReplyEngine {
     const now = this.now();
     const links = (await loadLinks(db, [ctx.avatar.id])).get(ctx.avatar.id) ?? [];
     const acquaintances = await linkedAvatars(db, links);
+    const otherStages = acquaintances.length
+      ? await db
+          .select({ target: relationships.target, stage: relationships.stage })
+          .from(relationships)
+          .where(and(eq(relationships.avatarId, ctx.avatar.id), inArray(relationships.target, acquaintances.map((a) => `avatar:${a.id}`))))
+      : [];
     const group = ctx.type === 'group' ? await this.groupInfo(ctx, situation, profile.preferences?.nickname, links) : null;
     const embedder = await embedderFromSettings(db, this.deps.box, settings, this.deps.fetchFn).catch(() => null);
     const [relationship, mood, impression] = await Promise.all([
@@ -779,6 +785,7 @@ export class ReplyEngine {
         bio: a.bio,
         occupation: a.persona.basic?.occupation,
         traits: a.persona.personality?.traits,
+        stage: otherStages.find((r) => r.target === `avatar:${a.id}`)?.stage,
       })),
       settings,
       history,

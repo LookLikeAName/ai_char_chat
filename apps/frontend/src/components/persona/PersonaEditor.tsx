@@ -13,6 +13,7 @@ import {
   type PersonaIssue,
   type PersonaPath,
   type SectionMeta,
+  type Stage,
 } from '@acc/shared';
 import { api } from '../../lib/api.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
@@ -30,11 +31,13 @@ interface Props {
   onChange: (next: PersonaState) => void;
   /** 相關的角色：AI 補完與一致性檢查會參考 */
   references?: AvatarLink[];
+  /** 和玩家的關係（新增時是一開始的關係） */
+  userStage?: Stage;
 }
 
 type Busy = { label: string } | null;
 
-export function PersonaEditor({ value, onChange, references = [] }: Props) {
+export function PersonaEditor({ value, onChange, references = [], userStage }: Props) {
   // 還沒寫關係的先不送
   const refs = references.filter((r) => r.relation.trim());
   const toast = useToast();
@@ -69,6 +72,7 @@ export function PersonaEditor({ value, onChange, references = [] }: Props) {
         seed: opts.seed || undefined,
         only: opts.only,
         references: refs,
+        userStage,
       });
       onChange({ ...value, name: res.name || value.name, bio: res.bio || value.bio, persona: res.persona });
       setFresh(new Set(res.filled));
@@ -88,7 +92,7 @@ export function PersonaEditor({ value, onChange, references = [] }: Props) {
   async function check() {
     setBusy({ label: '檢查一致性中…' });
     try {
-      const res = await api.checkPersona({ name: value.name, bio: value.bio, persona, locks, references: refs });
+      const res = await api.checkPersona({ name: value.name, bio: value.bio, persona, locks, references: refs, userStage });
       setIssues(res.issues);
       if (!res.issues.length) toast('沒有發現矛盾', 'success');
     } catch (err) {

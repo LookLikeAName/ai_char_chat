@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { avatarPhotoSchema, IMAGE_STYLES, type AvatarPhoto, type ImageStyle } from './images.ts';
 import { llmBindingSchema } from './llm.ts';
 import { PERSONA_PATHS, type PersonaDraft, type PersonaPath } from './persona.ts';
-import { INITIAL_STAGES } from './relationship.ts';
+import { INITIAL_STAGES, STAGES } from './relationship.ts';
 
 
 /**
@@ -12,6 +12,8 @@ import { INITIAL_STAGES } from './relationship.ts';
 export const avatarLinkSchema = z.object({
   avatarId: z.uuid(),
   relation: z.string().trim().min(1, '請寫一句你們的關係').max(200),
+  /** 兩個 avatar 之間一開始的關係（之後會隨互動變化）；改了會重設雙方的關係 */
+  stage: z.enum(INITIAL_STAGES).default('acquaintance'),
 });
 export type AvatarLink = z.infer<typeof avatarLinkSchema>;
 export const MAX_AVATAR_LINKS = 12;
@@ -79,6 +81,8 @@ export const personaGenerateSchema = z.object({
   only: z.array(z.string()).optional(),
   /** 參考的角色：新設定要和他們一致 */
   references: z.array(avatarLinkSchema).max(MAX_AVATAR_LINKS).default([]),
+  /** 和玩家目前（或一開始）的關係：「和玩家的關係」區塊要符合 */
+  userStage: z.enum(STAGES).optional(),
 });
 export type PersonaGenerateInput = z.input<typeof personaGenerateSchema>;
 
@@ -98,6 +102,7 @@ export const personaCheckSchema = z.object({
   persona: z.record(z.string(), z.unknown()),
   locks: z.array(z.string()).default([]),
   references: z.array(avatarLinkSchema).max(MAX_AVATAR_LINKS).default([]),
+  userStage: z.enum(STAGES).optional(),
 });
 
 export interface PersonaIssue {

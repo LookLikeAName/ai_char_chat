@@ -15,6 +15,7 @@ import {
   TRANSFER_VERSION,
   type AvatarCard,
   type ImportResultDto,
+  type InitialStage,
   type TransferFile,
 } from '@acc/shared';
 import { avatarLinks, avatars, avatarState, conversationMembers, conversations, memories, messages, relationships } from '../db/schema.ts';
@@ -128,7 +129,7 @@ export async function transferRoutes(app: FastifyInstance) {
     const cards = [];
     for (const r of rows) {
       const c = await card(r, opts);
-      const own = (links.get(r.id) ?? []).flatMap((l) => (index.has(l.avatarId) ? [{ index: index.get(l.avatarId)!, relation: l.relation }] : []));
+      const own = (links.get(r.id) ?? []).flatMap((l) => (index.has(l.avatarId) ? [{ index: index.get(l.avatarId)!, relation: l.relation, stage: l.stage }] : []));
       cards.push(own.length ? { ...c, links: own } : c);
     }
     return reply.header('content-disposition', attachment('avatars')).send(file(cards));
@@ -236,13 +237,13 @@ export async function transferRoutes(app: FastifyInstance) {
           result.push({ ...created, name: c.name, memories: mems.length, messages: msgs.length });
         }
         // 檔案裡互相關聯的 avatar（每一對只存一次，a_id < b_id）
-        const pairs = new Map<string, { aId: string; bId: string; relation: string }>();
+        const pairs = new Map<string, { aId: string; bId: string; relation: string; stage: InitialStage }>();
         prepared.forEach(({ c }, i) => {
           for (const l of c.links ?? []) {
             const other = result[l.index];
             if (!other || l.index === i) continue;
             const [aId, bId] = [result[i]!.id, other.id].sort() as [string, string];
-            if (!pairs.has(`${aId}:${bId}`)) pairs.set(`${aId}:${bId}`, { aId, bId, relation: l.relation });
+            if (!pairs.has(`${aId}:${bId}`)) pairs.set(`${aId}:${bId}`, { aId, bId, relation: l.relation, stage: l.stage });
           }
         });
         if (pairs.size) {
@@ -251,8 +252,8 @@ export async function transferRoutes(app: FastifyInstance) {
             .insert(relationships)
             .values(
               [...pairs.values()].flatMap((p) => [
-                { avatarId: p.aId, target: `avatar:${p.bId}`, stage: 'acquaintance' as const, ...INITIAL_VALUES.acquaintance },
-                { avatarId: p.bId, target: `avatar:${p.aId}`, stage: 'acquaintance' as const, ...INITIAL_VALUES.acquaintance },
+                { avatarId: p.aId, target: `avatar:${p.bId}`, stage: p.stage, ...INITIAL_VALUES[p.stage] },
+                { avatarId: p.bId, target: `avatar:${p.aId}`, stage: p.stage, ...INITIAL_VALUES[p.stage] },
               ]),
             )
             .onConflictDoNothing();

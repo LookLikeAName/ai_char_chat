@@ -20,6 +20,7 @@ import type {
   AvatarPhoto,
   EventCategory,
   EventLevel,
+  InitialStage,
   TraceDto,
   LifeLogEvent,
   LlmBinding,
@@ -126,6 +127,8 @@ export const avatarLinks = pgTable(
       .notNull()
       .references(() => avatars.id, { onDelete: 'cascade' }),
     relation: text('relation').notNull(),
+    /** 一開始的關係；兩邊各自的 relationships 之後會自己變化 */
+    stage: text('stage').$type<InitialStage>().notNull().default('acquaintance'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.aId, t.bId] }), index('avatar_links_b_idx').on(t.bId)],

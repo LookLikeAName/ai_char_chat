@@ -2941,6 +2941,19 @@ fieldset.field {
   gap: 4px;
 }
 
+.related-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.related-head select {
+  width: auto;
+  padding-block: 2px;
+  font-size: 13px;
+}
+
 .related-body .member-name {
   color: inherit;
   text-decoration: none;

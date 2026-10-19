@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { avatarPhotoSchema } from './images.ts';
 import { llmParamsSchema } from './llm.ts';
-import { moodSchema, RELATIONSHIP_EVENTS, STAGES } from './relationship.ts';
+import { INITIAL_STAGES, moodSchema, RELATIONSHIP_EVENTS, STAGES } from './relationship.ts';
 
 export const TRANSFER_FORMAT = 'ai-char-chat';
 export const TRANSFER_VERSION = 1;
@@ -33,7 +33,13 @@ export const avatarCardSchema = z.object({
   photoReference: imageSchema.nullable().optional(),
   /** 相關的角色：同一個檔案裡的第幾個（從 0 開始），只有一起匯出的才帶 */
   links: z
-    .array(z.object({ index: z.number().int().min(0), relation: z.string().trim().min(1).max(200) }))
+    .array(
+      z.object({
+        index: z.number().int().min(0),
+        relation: z.string().trim().min(1).max(200),
+        stage: z.enum(INITIAL_STAGES).default('acquaintance'),
+      }),
+    )
     .max(12)
     .optional(),
   /** 下面三項匯出時可以選擇不帶 */

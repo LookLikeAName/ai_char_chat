@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { MAX_AVATAR_LINKS, type AvatarLink } from '@acc/shared';
+import { INITIAL_STAGES, MAX_AVATAR_LINKS, STAGE_LABELS, type AvatarLink, type InitialStage } from '@acc/shared';
 import { api, qk } from '../lib/api.ts';
 import { AvatarImage } from './AvatarImage.tsx';
 import { Icon } from './Icon.tsx';
@@ -24,8 +24,7 @@ export function RelatedAvatarsCard({
   const choices = others.filter((a) => !value.some((l) => l.avatarId === a.id));
   const me = selfName.trim() || '這個角色';
 
-  const setRelation = (id: string, relation: string) =>
-    onChange(value.map((l) => (l.avatarId === id ? { ...l, relation } : l)));
+  const update = (id: string, p: Partial<AvatarLink>) => onChange(value.map((l) => (l.avatarId === id ? { ...l, ...p } : l)));
 
   if (!others.length && !value.length) return null;
 
@@ -43,19 +42,32 @@ export function RelatedAvatarsCard({
               <li key={l.avatarId}>
                 <AvatarImage name={a?.name ?? '?'} src={a?.imageUrl ?? null} size={36} />
                 <div className="related-body">
-                  {a ? (
-                    <Link className="member-name" to={`/avatars/${a.id}`}>
-                      {a.name}
-                    </Link>
-                  ) : (
-                    <span className="member-name">（已刪除）</span>
-                  )}
+                  <div className="related-head">
+                    {a ? (
+                      <Link className="member-name" to={`/avatars/${a.id}`}>
+                        {a.name}
+                      </Link>
+                    ) : (
+                      <span className="member-name">（已刪除）</span>
+                    )}
+                    <select
+                      value={l.stage}
+                      onChange={(e) => update(l.avatarId, { stage: e.target.value as InitialStage })}
+                      aria-label={`和${a?.name ?? '這個角色'}一開始的關係`}
+                    >
+                      {INITIAL_STAGES.map((st) => (
+                        <option key={st} value={st}>
+                          {STAGE_LABELS[st]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <input
                     value={l.relation}
                     maxLength={200}
                     aria-label={`和${a?.name ?? '這個角色'}的關係`}
                     placeholder={`例如：同一間設計公司的同事，${a?.name ?? '對方'}是${me}的主管`}
-                    onChange={(e) => setRelation(l.avatarId, e.target.value)}
+                    onChange={(e) => update(l.avatarId, { relation: e.target.value })}
                   />
                   {!l.relation.trim() && <span className="hint warn-text">請寫一句你們的關係</span>}
                 </div>
@@ -88,7 +100,7 @@ export function RelatedAvatarsCard({
             className="btn"
             disabled={!pick}
             onClick={() => {
-              onChange([...value, { avatarId: pick, relation: '' }]);
+              onChange([...value, { avatarId: pick, relation: '', stage: 'friend' }]);
               setPick('');
             }}
           >
@@ -96,7 +108,11 @@ export function RelatedAvatarsCard({
           </button>
         </div>
       )}
-      {value.length > 0 && <p className="hint">關係的描述兩邊共用（在對方的頁面也看得到），請用名字寫清楚誰是誰。</p>}
+      {value.length > 0 && (
+        <p className="hint">
+          關係的描述兩邊共用（在對方的頁面也看得到），請用名字寫清楚誰是誰。右邊選的是他們一開始的熟悉程度，之後會隨群組裡的互動變化；改了它會把他們兩個之間的好感重新設定。
+        </p>
+      )}
     </section>
   );
 }

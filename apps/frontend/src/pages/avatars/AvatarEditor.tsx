@@ -53,6 +53,12 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
   const [links, setLinks] = useState<AvatarLink[]>(avatar?.links ?? []);
   const linksOk = links.every((l) => l.relation.trim());
+  const { data: state } = useQuery({
+    queryKey: qk.avatarState(avatar?.id ?? ''),
+    queryFn: () => api.avatarState(avatar!.id),
+    enabled: !!avatar,
+  });
+  const userStage = state?.relationship.stage;
 
   const empty = isPersonaEmpty(p.persona);
   const missing = empty ? [] : missingFields(p.persona);
@@ -158,19 +164,6 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
               <textarea value={p.bio} onChange={(e) => setP({ ...p, bio: e.target.value })} maxLength={500} rows={3} />
               <span className="hint">一句話描述這個角色。人格設定空著時，avatar 只依簡介行動。</span>
             </label>
-            {!avatar && (
-              <label className="field">
-                <span className="field-label">和你的初始關係</span>
-                <select value={initialStage} onChange={(e) => setInitialStage(e.target.value as InitialStage)}>
-                  {INITIAL_STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {STAGE_LABELS[s]}
-                    </option>
-                  ))}
-                </select>
-                <span className="hint">決定一開始的好感與信任；建立後可以在聊天畫面的資訊面板重設。</span>
-              </label>
-            )}
           </section>
           <AvatarImageCard avatar={avatar} state={p} />
           <PhotoSettingsCard avatar={avatar} value={photo} onChange={setPhoto} />
@@ -179,8 +172,9 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
 
       {tab === 'persona' && (
         <>
+          <UserRelationCard avatar={avatar} initialStage={initialStage} onInitialStage={setInitialStage} />
           <RelatedAvatarsCard selfId={avatar?.id ?? null} selfName={p.name} value={links} onChange={setLinks} />
-          <PersonaEditor value={p} onChange={setP} references={links} />
+          <PersonaEditor value={p} onChange={setP} references={links} userStage={avatar ? userStage : initialStage} />
         </>
       )}
 
@@ -243,6 +237,98 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
         </button>
       </footer>
     </form>
+  );
+}
+
+/** 和玩家的熟悉程度（關係階段）：新增時選一開始的程度；已經建立的顯示目前的關係，也可以重設 */
+function UserRelationCard({
+  avatar,
+  initialStage,
+  onInitialStage,
+}: {
+  avatar: AvatarDto | null;
+  initialStage: InitialStage;
+  onInitialStage: (s: InitialStage) => void;
+}) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [resetTo, setResetTo] = useState<InitialStage | ''>('');
+  const { data: state } = useQuery({
+    queryKey: qk.avatarState(avatar?.id ?? ''),
+    queryFn: () => api.avatarState(avatar!.id),
+    enabled: !!avatar,
+  });
+  const reset = useMutation({
+    mutationFn: (stage: InitialStage) => api.resetRelationship(avatar!.id, stage),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.avatarState(avatar!.id) });
+      setResetTo('');
+      toast('關係已重設', 'success');
+    },
+    onError: (err) => toast(errorText(err), 'error'),
+  });
+
+  const stages = (
+    <>
+      {INITIAL_STAGES.map((s) => (
+        <option key={s} value={s}>
+          {STAGE_LABELS[s]}
+        </option>
+      ))}
+    </>
+  );
+
+  if (!avatar) {
+    return (
+      <section className="card">
+        <h2>和你的熟悉程度</h2>
+        <label className="field">
+          <span className="field-label">一開始的關係</span>
+          <select value={initialStage} onChange={(e) => onInitialStage(e.target.value as InitialStage)}>
+            {stages}
+          </select>
+          <span className="hint">
+            決定一開始的好感與信任。AI 補完會照這個程度寫下面人格設定裡的「和你的關係」，例如選「朋友」就不會寫成剛認識。建立後也可以在這裡或聊天的資訊面板重設。
+          </span>
+        </label>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <h2>和你的熟悉程度</h2>
+      {state ? (
+        <p>
+          目前：<span className={`stage stage-${state.relationship.stage}`}>{STAGE_LABELS[state.relationship.stage]}</span>
+          <span className="hint">
+            {' '}
+            好感 {state.relationship.affinity}、信任 {state.relationship.trust}
+          </span>
+        </p>
+      ) : (
+        <p className="hint">載入中…</p>
+      )}
+      <div className="related-add">
+        <select value={resetTo} onChange={(e) => setResetTo(e.target.value as InitialStage)} aria-label="重設成">
+          <option value="">重設成…</option>
+          {stages}
+        </select>
+        <button
+          type="button"
+          className="btn"
+          disabled={!resetTo || reset.isPending}
+          onClick={() => {
+            if (resetTo && confirm(`要把和你的關係重設成「${STAGE_LABELS[resetTo]}」嗎？好感與信任會回到起始值，記憶不會刪除。`)) {
+              reset.mutate(resetTo);
+            }
+          }}
+        >
+          重設
+        </button>
+      </div>
+      <span className="hint">關係會隨聊天自己變化；AI 補完與一致性檢查會照目前的程度寫人格設定裡的「和你的關係」。</span>
+    </section>
   );
 }
 
