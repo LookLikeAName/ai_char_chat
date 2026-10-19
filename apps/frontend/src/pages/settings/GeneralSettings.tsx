@@ -10,6 +10,7 @@ import {
   type LlmProfileDto,
   type ReplyPacing,
 } from '@acc/shared';
+import { AdultTestPanel } from '../../components/AdultTestPanel.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -113,6 +114,7 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
         <p className="hint">
           雲端供應商（例如 Gemini）有各自的使用政策，可能仍會拒絕部分內容；需要時可以替個別 avatar 改綁限制較少的模型。所有 avatar 一律設定為成年人。
         </p>
+        {s.adultContent && <AdultTestPanel />}
       </section>
 
       <section className="card">

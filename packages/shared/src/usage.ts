@@ -23,7 +23,7 @@ export interface UsageSummaryDto {
 }
 
 /** 玩家在畫面上直接按的功能，不受每日上限限制（上限是為了擋住背景自動的呼叫） */
-export const QUOTA_EXEMPT_PURPOSES: readonly string[] = ['persona.generate', 'persona.check', 'profile.summary'];
+export const QUOTA_EXEMPT_PURPOSES: readonly string[] = ['persona.generate', 'persona.check', 'profile.summary', 'adult.test'];
 
 export const USAGE_PURPOSE_LABELS: Record<string, string> = {
   reply: '回覆',
@@ -35,6 +35,7 @@ export const USAGE_PURPOSE_LABELS: Record<string, string> = {
   'life.log': '生活日誌',
   'image.caption': '描述圖片',
   'photo.generate': '拍照片',
+  'adult.test': '成人內容測試',
 };
 
 export function totalTokens(t: Pick<UsageTotals, 'inputTokens' | 'outputTokens'>): number {

@@ -2960,6 +2960,47 @@ fieldset.field {
   min-width: 0;
 }
 
+.adult-test {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.adult-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-left: 4px solid var(--text-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.adult-result.verdict-allowed {
+  border-left-color: var(--ok);
+}
+
+.adult-result.verdict-partial {
+  border-left-color: var(--warn);
+}
+
+.adult-result.verdict-refused,
+.adult-result.verdict-blocked,
+.adult-result.verdict-error {
+  border-left-color: var(--bad);
+}
+
+.adult-result details {
+  margin-top: 4px;
+}
+
+.adult-reply {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+
 .import-list {
   display: flex;
   flex-direction: column;

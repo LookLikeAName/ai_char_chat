@@ -60,3 +60,29 @@ export function isValidTimezone(tz: string): boolean {
     return false;
   }
 }
+
+/** 測試一個聊天模型能不能寫成人內容（設定 → 一般 → 內容） */
+export const adultTestSchema = z.object({ profileId: z.uuid() });
+
+export const ADULT_TEST_VERDICTS = ['allowed', 'partial', 'refused', 'blocked', 'error'] as const;
+export type AdultTestVerdict = (typeof ADULT_TEST_VERDICTS)[number];
+
+export const ADULT_TEST_LABELS: Record<AdultTestVerdict, { title: string; text: string }> = {
+  allowed: { title: '可以', text: '模型照著角色寫出了露骨的親密內容。' },
+  partial: { title: '只到暗示', text: '模型願意調情、曖昧，但避開露骨的描寫（通常是模型本身的限制）。' },
+  refused: { title: '拒絕', text: '模型拒絕了，或跳出角色說明它不能寫這類內容。' },
+  blocked: { title: '被供應商擋下', text: '供應商的安全過濾直接擋掉了這次回覆。' },
+  error: { title: '測試失敗', text: '呼叫模型時發生錯誤，沒辦法判斷。' },
+};
+
+export interface AdultTestResult {
+  verdict: AdultTestVerdict;
+  /** 判斷的理由，或錯誤訊息 */
+  reason: string;
+  /** 模型的回覆（訊息內容）；被擋下或失敗時是空的 */
+  reply: string[];
+  finishReason: string | null;
+  /** 誰判斷的：系統工具模型，或沒有設定時用關鍵字 */
+  judgedBy: 'utility' | 'keywords' | 'provider';
+  model: string;
+}

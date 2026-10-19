@@ -339,6 +339,7 @@ prompt 依序組成：
 - 實作：自己寫的輕量 adapter（直接呼叫各家 HTTP API），不沿用 `ai_avatar` 的 `pi-ai`：這裡需要的是「每次呼叫帶不同參數 + JSON 輸出」，直接控制請求內容比較單純，也容易用假的 fetch 測試。
 - **系統工具模型**：系統另綁一個設定檔，負責補完設定、萃取記憶、反思、生活日誌、測驗摘要；建議選便宜快速的模型。
 - 成人內容：雲端供應商有各自的使用政策，可能拒絕；開啟成人內容時會放寬 Gemini 的安全過濾，仍被拒絕時可以替個別 avatar 換成限制較少的模型（例如本機模型）。
+- 成人內容測試（設定 → 一般 → 內容，勾選後出現；`POST /settings/adult-test`，`services/adultTest.ts`）：選一個聊天用的設定檔，用和真正回覆相同的 prompt（交往中的測試角色、允許成人內容、放寬安全設定）請它把親密的過程露骨地寫出來。結果分成：可以、只到暗示、拒絕、被供應商擋下（Gemini 的 `SAFETY`／`PROHIBITED_CONTENT`、OpenAI 的 `content_filter`、Anthropic 的 `refusal`，或錯誤訊息提到安全過濾）、測試失敗。有系統工具模型時由它分級（也放寬安全設定），沒有或它不肯判斷時用關鍵字粗略判斷。用量記為 `adult.test`，不受每日上限限制。
 
 ### 6.2 記憶結構（參考 Generative Agents，Park et al., 2023）
 

@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AdultTestResult,
   AvatarDto,
   AvatarLink,
   AvatarStateDto,
@@ -93,6 +94,7 @@ export const api = {
 
   settings: () => request<AppSettings>('GET', '/api/settings'),
   updateSettings: (patch: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/settings', patch),
+  adultTest: (profileId: string) => request<AdultTestResult>('POST', '/api/settings/adult-test', { profileId }),
 
   llmProfiles: () => request<LlmProfileDto[]>('GET', '/api/llm-profiles'),
   createLlmProfile: (input: LlmProfileInput) => request<LlmProfileDto>('POST', '/api/llm-profiles', input),

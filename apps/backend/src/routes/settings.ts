@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { appSettingsPatchSchema, appSettingsSchema, isValidTimezone } from '@acc/shared';
+import { adultTestSchema, appSettingsPatchSchema, appSettingsSchema, isValidTimezone } from '@acc/shared';
 import { HttpError, parseBody } from '../errors.ts';
-import { assertProfileExists } from '../services/llmProfiles.ts';
+import { runAdultTest } from '../services/adultTest.ts';
+import { assertProfileExists, getProfile } from '../services/llmProfiles.ts';
 import { loadSettings, saveSettings } from '../services/settings.ts';
 
 export async function settingsRoutes(app: FastifyInstance) {
@@ -18,5 +19,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     await saveSettings(db, next);
     await events.publish({ type: 'settings.changed' });
     return next;
+  });
+
+  /** 測試聊天模型能不能寫成人內容：會真的呼叫一次模型（加上判斷，最多兩次） */
+  app.post('/settings/adult-test', async (req) => {
+    const { db } = app.deps;
+    const { profileId } = parseBody(adultTestSchema, req.body);
+    await assertProfileExists(db, profileId, 'chat');
+    const profile = await getProfile(db, profileId);
+    return runAdultTest(app.deps, await loadSettings(db), profile);
   });
 }
