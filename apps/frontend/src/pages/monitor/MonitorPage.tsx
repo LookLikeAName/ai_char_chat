@@ -24,7 +24,7 @@ export function MonitorPage() {
         </div>
         <nav className="settings-tabs">
           {TABS.map((t) => (
-            <NavLink key={t.to} to={t.to} className="settings-tab">
+            <NavLink key={t.to} to={`/monitor/${t.to}`} className="settings-tab">
               {t.label}
             </NavLink>
           ))}
@@ -32,7 +32,7 @@ export function MonitorPage() {
       </aside>
       <main className="pane-main">
         <Routes>
-          <Route index element={<Navigate to="events" replace />} />
+          <Route index element={<Navigate to="/monitor/events" replace />} />
           <Route path="events" element={<EventsTab />} />
           <Route path="traces" element={<TracesTab />} />
           <Route path="traces/:traceId" element={<TraceDetail />} />

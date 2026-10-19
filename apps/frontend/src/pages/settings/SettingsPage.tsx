@@ -22,7 +22,7 @@ export function SettingsPage() {
         </div>
         <nav className="settings-tabs">
           {TABS.map((t) => (
-            <NavLink key={t.to} to={t.to} className="settings-tab">
+            <NavLink key={t.to} to={`/settings/${t.to}`} className="settings-tab">
               {t.label}
             </NavLink>
           ))}
@@ -30,7 +30,7 @@ export function SettingsPage() {
       </aside>
       <main className="pane-main">
         <Routes>
-          <Route index element={<Navigate to="general" replace />} />
+          <Route index element={<Navigate to="/settings/general" replace />} />
           <Route path="general" element={<GeneralSettings />} />
           <Route path="llm/*" element={<LlmProfilesSettings />} />
           <Route path="usage" element={<UsageSettings />} />
