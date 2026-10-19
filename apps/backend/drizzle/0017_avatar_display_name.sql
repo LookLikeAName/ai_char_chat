@@ -1,0 +1,1 @@
+ALTER TABLE "avatars" ADD COLUMN "display_name" text DEFAULT '' NOT NULL;

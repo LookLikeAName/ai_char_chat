@@ -100,6 +100,8 @@ export const llmProfiles = pgTable('llm_profiles', {
 export const avatars = pgTable('avatars', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   name: text('name').notNull(),
+  /** 通訊軟體上的顯示名稱；空字串表示和本名一樣 */
+  displayName: text('display_name').notNull().default(''),
   bio: text('bio').notNull().default(''),
   imagePath: text('image_path'),
   /** 完整人格設定（PersonaDraft）：全空或全部填滿 */

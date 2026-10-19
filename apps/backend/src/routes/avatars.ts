@@ -83,6 +83,7 @@ export async function avatarRoutes(app: FastifyInstance) {
         .insert(avatars)
         .values({
           name: input.name,
+          displayName: input.displayName ?? '',
           bio: input.bio,
           llm: input.llm,
           persona,
@@ -112,6 +113,7 @@ export async function avatarRoutes(app: FastifyInstance) {
       .update(avatars)
       .set({
         name: input.name,
+        ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
         bio: input.bio,
         llm: input.llm,
         ...(persona !== undefined ? { persona } : {}),

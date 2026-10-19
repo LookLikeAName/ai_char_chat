@@ -16,6 +16,7 @@ import {
   GROUP_MESSAGE_BUDGET,
   localClock,
   mentions,
+  shownName,
   STAGE_LABELS,
   type AppSettings,
   type SpeakerCandidate,
@@ -364,6 +365,9 @@ export class ReplyEngine {
         .limit(10);
 
       const candidates: SpeakerCandidate[] = [];
+      // 本名或顯示名稱都算點名
+      const aliases = new Map<string, string[]>();
+      const calls = (t: string, id: string) => (aliases.get(id) ?? []).some((n) => mentions(t, n));
       for (const { avatar } of memberRows) {
         if (!avatar.llm) continue;
         // 超過自己的每日上限：這一輪不參加
@@ -382,15 +386,16 @@ export class ReplyEngine {
           (m) => m.senderAvatarId === avatar.id && now.getTime() - m.createdAt.getTime() < ACTIVE_WINDOW_MS,
         );
         const a = chatting ? { status: 'free' as const } : availabilityAt(p, now, settings.timezone);
+        aliases.set(avatar.id, [avatar.name, avatar.displayName]);
         candidates.push({
           id: avatar.id,
-          name: avatar.name,
+          name: shownName(avatar),
           status: a.status,
           extraversion: p.personality?.bigFive?.extraversion ?? 50,
           affinity: rel.affinity,
           relevance: interests ? Math.min(1, bigramSimilarity(text, interests) * 4) : 0,
           recentMessages: recent.filter((m) => m.senderAvatarId === avatar.id).length,
-          mentioned: mentions(text, avatar.name),
+          mentioned: calls(text, avatar.id),
         });
       }
       const scored = chooseSpeakers(candidates, { random: this.random, forceOne: addressesEveryone(text) });
@@ -493,7 +498,7 @@ export class ReplyEngine {
         const said = toSend.slice(0, sent).join('\n');
         for (const other of scored) {
           if (other.id === cand.id || other.status === 'sleep' || spoken.includes(other.name)) continue;
-          if (queue.some((q) => q.id === other.id) || !mentions(said, other.name)) continue;
+          if (queue.some((q) => q.id === other.id) || !calls(said, other.id)) continue;
           queue.push({ ...other, mentioned: true, chosen: true, why: `被${cand.name}點名` });
           await logEvent({ category: 'group', type: 'group.chain', avatarId: other.id, message: `${cand.name} 點名了 ${other.name}，讓他接著回` });
         }
@@ -691,7 +696,7 @@ export class ReplyEngine {
     if (Object.keys(output.othersAffinity).length) {
       const names = await this.memberNames(ctx.conversationId);
       for (const [name, d] of Object.entries(output.othersAffinity)) {
-        const id = [...names.entries()].find(([, n]) => n === name)?.[0];
+        const id = [...names.entries()].find(([, n]) => n.names.includes(name))?.[0];
         if (!id || id === ctx.avatar.id) continue;
         const r = await applyInteraction(db, ctx.avatar.id, { affinity: d }, warmUp, `avatar:${id}`);
         others.push(`對${name}的好感 ${r.before.affinity} → ${r.after.affinity}`);
@@ -707,7 +712,7 @@ export class ReplyEngine {
         // 雙向：先說話的人也會因為後來接話的人而變熟
         const r = await growFamiliarity(db, ctx.avatar.id, id, day, warmUp);
         if (r && r.before.stage !== r.after.stage) {
-          others.push(`和${names.get(id)}熟了起來：${STAGE_LABELS[r.before.stage]} → ${STAGE_LABELS[r.after.stage]}`);
+          others.push(`和${names.get(id)!.shown}熟了起來：${STAGE_LABELS[r.before.stage]} → ${STAGE_LABELS[r.after.stage]}`);
         }
         const back = await growFamiliarity(db, id, ctx.avatar.id, day);
         if (back && back.before.stage !== back.after.stage) {
@@ -755,7 +760,7 @@ export class ReplyEngine {
     const acquaintances = await linkedAvatars(db, links);
     // 在群組裡認識的（沒有設成相關角色、已經不是陌生人的）
     const met = await db
-      .select({ id: avatars.id, name: avatars.name, bio: avatars.bio, persona: avatars.persona })
+      .select({ id: avatars.id, name: avatars.name, displayName: avatars.displayName, bio: avatars.bio, persona: avatars.persona })
       .from(relationships)
       .innerJoin(avatars, sql`${relationships.target} = 'avatar:' || ${avatars.id}::text`)
       .where(and(eq(relationships.avatarId, ctx.avatar.id), ne(relationships.stage, 'stranger')));
@@ -795,7 +800,7 @@ export class ReplyEngine {
     const images = await prepareImages(this.deps, settings, history, { selfId: ctx.avatar.id, canSee, preview: opts.preview });
     const photosLeft = await photosRemaining(db, settings, ctx.avatar.id, { mediaDir: this.deps.mediaDir, now });
     const { system, messages: built } = buildReplyPrompt({
-      avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
+      avatar: { name: ctx.avatar.name, displayName: ctx.avatar.displayName, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       user: profile.preferences
         ? { preferences: profile.preferences, summary: profile.summary, results: profile.results }
         : null,
@@ -810,6 +815,7 @@ export class ReplyEngine {
       group,
       acquaintances: acquaintances.map((a) => ({
         name: a.name,
+        displayName: a.displayName,
         relation: a.relation,
         bio: a.bio,
         occupation: a.persona.basic?.occupation,
@@ -869,6 +875,7 @@ export class ReplyEngine {
       members.push({
         id: avatar.id,
         name: avatar.name,
+        displayName: avatar.displayName,
         bio: avatar.bio,
         relationship: { stage: r.stage, affinity: r.affinity, trust: r.trust },
         relation: links.find((l) => l.avatarId === avatar.id)?.relation,
@@ -899,13 +906,14 @@ export class ReplyEngine {
     return [...new Set(ids.filter((w): w is string => !!w && w !== selfId))];
   }
 
-  private async memberNames(conversationId: string): Promise<Map<string, string>> {
+  /** 群組成員：id → 顯示的名字與本名 */
+  private async memberNames(conversationId: string): Promise<Map<string, { shown: string; names: string[] }>> {
     const rows = await this.deps.db
-      .select({ id: avatars.id, name: avatars.name })
+      .select({ id: avatars.id, name: avatars.name, displayName: avatars.displayName })
       .from(conversationMembers)
       .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
       .where(eq(conversationMembers.conversationId, conversationId));
-    return new Map(rows.map((r) => [r.id, r.name]));
+    return new Map(rows.map((r) => [r.id, { shown: shownName(r), names: [r.name, r.displayName].filter(Boolean) }]));
   }
 
   /** 監控頁：如果現在回覆（或主動發話），會送出什麼 */

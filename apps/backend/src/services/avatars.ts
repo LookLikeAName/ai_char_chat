@@ -35,6 +35,7 @@ export function avatarToDto(
   return {
     id: row.id,
     name: row.name,
+    displayName: row.displayName,
     bio: row.bio,
     imageUrl: mediaUrl(row.imagePath),
     llm: row.llm ?? null,

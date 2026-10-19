@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { INITIAL_STAGES, MAX_AVATAR_LINKS, STAGE_LABELS, type AvatarLink, type InitialStage } from '@acc/shared';
+import { INITIAL_STAGES, MAX_AVATAR_LINKS, shownName, STAGE_LABELS, type AvatarLink, type InitialStage } from '@acc/shared';
 import { api, qk } from '../lib/api.ts';
 import { AvatarImage } from './AvatarImage.tsx';
 import { Icon } from './Icon.tsx';
@@ -40,12 +40,13 @@ export function RelatedAvatarsCard({
             const a = all.find((x) => x.id === l.avatarId);
             return (
               <li key={l.avatarId}>
-                <AvatarImage name={a?.name ?? '?'} src={a?.imageUrl ?? null} size={36} />
+                <AvatarImage name={a ? shownName(a) : '?'} src={a?.imageUrl ?? null} size={36} />
                 <div className="related-body">
                   <div className="related-head">
                     {a ? (
                       <Link className="member-name" to={`/avatars/${a.id}`}>
                         {a.name}
+                        {shownName(a) !== a.name && <span className="hint">（{shownName(a)}）</span>}
                       </Link>
                     ) : (
                       <span className="member-name">（已刪除）</span>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
+import { shownName } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { ExportDialog, ImportDialog } from '../../components/TransferDialogs.tsx';
@@ -36,9 +37,12 @@ export function AvatarsPage() {
           {!isLoading && avatars.length === 0 && <p className="hint pad">還沒有 avatar，按右上角的 + 新增。</p>}
           {avatars.map((a) => (
             <Link key={a.id} to={`/avatars/${a.id}`} className={`chat-item${a.id === avatarId ? ' active' : ''}`}>
-              <AvatarImage name={a.name} src={a.imageUrl} size={44} />
+              <AvatarImage name={shownName(a)} src={a.imageUrl} size={44} />
               <span className="chat-item-body">
-                <span className="chat-item-title">{a.name}</span>
+                <span className="chat-item-title">
+                  {shownName(a)}
+                  {shownName(a) !== a.name && <span className="hint">（本名 {a.name}）</span>}
+                </span>
                 <span className="chat-item-preview">
                   {!a.personaComplete && <span className="tag tag-warn">未建立人格</span>} {a.bio || '（沒有簡介）'}
                 </span>

@@ -1,7 +1,7 @@
 // 記憶萃取：對話告一段落（最後一則訊息後 10 分鐘，或累積 30 則）時，
 // 請系統工具模型以 avatar 的角度挑出值得記住的事。重複觸發是安全的（以 memory_up_to 記錄處理到哪）。
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
-import type { AppSettings } from '@acc/shared';
+import { shownName, type AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, conversationMembers, conversations, messages, type MessageImage } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
@@ -63,11 +63,11 @@ export async function extractMemories(
 
   const avatar = member.avatar;
   const others = await db
-    .select({ id: avatars.id, name: avatars.name })
+    .select({ id: avatars.id, name: avatars.name, displayName: avatars.displayName })
     .from(conversationMembers)
     .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
     .where(eq(conversationMembers.conversationId, conversationId));
-  const names = new Map<string, string>(others.map((o) => [o.id, o.name]));
+  const names = new Map<string, string>(others.map((o) => [o.id, shownName(o)]));
   const transcript = rows
     .map((m) => {
       const who = m.senderType === 'user' ? '對方' : m.senderAvatarId === avatar.id ? '我' : (names.get(m.senderAvatarId ?? '') ?? '其他人');

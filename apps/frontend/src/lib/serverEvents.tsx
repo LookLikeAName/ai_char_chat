@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import {
   messagePreview,
+  shownName,
   type AvatarDto,
   type ClientMessage,
   type ConversationDto,
@@ -97,7 +98,7 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
     const notify = (m: MessageDto) => {
       const sender = qc.getQueryData<AvatarDto[]>(qk.avatars)?.find((a) => a.id === m.senderAvatarId);
       const conv = qc.getQueryData<ConversationDto[]>(qk.conversations)?.find((c) => c.id === m.conversationId);
-      const name = sender?.name ?? conv?.title ?? '新訊息';
+      const name = (sender && shownName(sender)) ?? conv?.title ?? '新訊息';
       showNotification({
         title: conv?.type === 'group' ? `${name}（${conv.title}）` : name,
         body: messagePreview(m),

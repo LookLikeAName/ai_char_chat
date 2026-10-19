@@ -154,6 +154,24 @@ describe.skipIf(!url)('群組', () => {
     expect(prompts).toHaveLength(0);
   });
 
+  it('用顯示名稱點名也算；群組裡的紀錄標顯示名稱', async () => {
+    await db.update(avatars).set({ displayName: 'Jerry' }).where(eq(avatars.id, ids['阿哲']!));
+    replyFor = (name) => (name === '阿哲' ? { messages: ['叫我？'] } : { messages: [] });
+    await say('@Jerry 在嗎');
+    expect(await engine().handleGroupTurn(groupId, { force: true })).toBe('done');
+    const rows = await db.select().from(messages).where(and(eq(messages.conversationId, groupId), eq(messages.senderType, 'avatar')));
+    expect(rows.map((r) => r.senderAvatarId)).toContain(ids['阿哲']);
+    // 小雨還不認識阿哲：只看得到 Jerry
+    await say('小雨你覺得呢');
+    replyFor = () => ({ messages: ['嗯？'] });
+    await engine().handleGroupTurn(groupId, { force: true });
+    const p = prompts.find((x) => x.who === '小雨')!.body;
+    const all = JSON.stringify(p.messages);
+    expect(all).toContain('Jerry');
+    expect(p.messages[0].content).toContain('- Jerry：（還不認識，只知道名字）');
+    expect(p.messages[0].content).not.toContain('本名阿哲');
+  });
+
   it('被點名的先回，後回的人看得到前面的人說了什麼', async () => {
     await say('阿哲你最近在寫什麼程式？');
     expect(await engine().handleGroupTurn(groupId, { force: true })).toBe('done');

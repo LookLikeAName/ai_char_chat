@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
+import { shownName } from '@acc/shared';
 import { api, qk } from '../lib/api.ts';
 import { errorText, useToast } from '../lib/toast.tsx';
 import { AvatarImage } from './AvatarImage.tsx';
@@ -34,7 +35,10 @@ export function GroupDialog({
       const name =
         title.trim() ||
         selected
-          .map((id) => avatars.find((a) => a.id === id)?.name ?? '')
+          .map((id) => {
+            const a = avatars.find((x) => x.id === id);
+            return a ? shownName(a) : '';
+          })
           .filter(Boolean)
           .join('、')
           .slice(0, 40);
@@ -101,8 +105,8 @@ export function GroupDialog({
                     disabled={!selected.includes(a.id) && selected.length >= MAX_MEMBERS}
                     onChange={() => toggle(a.id)}
                   />
-                  <AvatarImage name={a.name} src={a.imageUrl} size={28} />
-                  <span>{a.name}</span>
+                  <AvatarImage name={shownName(a)} src={a.imageUrl} size={28} />
+                  <span>{shownName(a)}</span>
                   {!a.llm && <span className="hint">（沒有綁定 LLM，不會說話）</span>}
                 </label>
               </li>

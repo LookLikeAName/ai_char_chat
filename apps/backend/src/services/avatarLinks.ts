@@ -58,6 +58,7 @@ export async function saveLinks(db: Db, avatarId: string, links: AvatarLink[]): 
 export interface LinkedAvatar {
   id: string;
   name: string;
+  displayName: string;
   bio: string;
   persona: PersonaDraft;
   relation: string;
@@ -67,7 +68,7 @@ export interface LinkedAvatar {
 export async function linkedAvatars(db: Db, links: AvatarLink[]): Promise<LinkedAvatar[]> {
   if (!links.length) return [];
   const rows = await db
-    .select({ id: avatars.id, name: avatars.name, bio: avatars.bio, persona: avatars.persona })
+    .select({ id: avatars.id, name: avatars.name, displayName: avatars.displayName, bio: avatars.bio, persona: avatars.persona })
     .from(avatars)
     .where(inArray(avatars.id, links.map((l) => l.avatarId)));
   return links.flatMap((l) => {
@@ -81,7 +82,11 @@ export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full'): strin
   const p = a.persona;
   const b = p.basic ?? {};
   const head = [b.age ? `${b.age} 歲` : '', b.gender ?? '', b.occupation ?? ''].filter(Boolean).join('、');
-  const lines = [`### ${a.name}${head ? `（${head}）` : ''}`, `你們的關係：${a.relation}（${STAGE_LABELS[a.stage]}）`, a.bio ? `簡介：${a.bio}` : ''];
+  const lines = [
+    `### ${a.name}${head ? `（${head}）` : ''}`,
+    a.displayName && a.displayName !== a.name ? `通訊軟體上的顯示名稱：${a.displayName}` : '',     `你們的關係：${a.relation}（${STAGE_LABELS[a.stage]}）`,
+    a.bio ? `簡介：${a.bio}` : '',
+  ];
   if (detail === 'full') {
     const day = p.routine?.schedule?.weekday?.map((s) => `${s.start}–${s.end} ${s.activity}`).join('；');
     lines.push(

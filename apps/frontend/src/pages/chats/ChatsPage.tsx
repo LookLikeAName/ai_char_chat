@@ -5,6 +5,7 @@ import {
   messagePreview,
   PROVIDER_LABELS,
   resolveParams,
+  shownName,
   STATUS_LABELS,
   type AvatarDto,
   type ConversationDto,
@@ -80,7 +81,16 @@ function ChatList({
 }) {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
-  const filtered = conversations.filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase()));
+  // 標題、成員的顯示名稱或本名都可以搜
+  const q = query.trim().toLowerCase();
+  const filtered = conversations.filter(
+    (c) =>
+      c.title.toLowerCase().includes(q) ||
+      c.members.some((m) => {
+        const a = avatars.find((x) => x.id === m.avatarId);
+        return !!a && `${a.name} ${a.displayName}`.toLowerCase().includes(q);
+      }),
+  );
   const dms = filtered.filter((c) => c.type === 'dm');
   const groups = filtered.filter((c) => c.type === 'group');
 
@@ -163,7 +173,10 @@ function StatusDot({ avatar }: { avatar?: AvatarDto }) {
 }
 
 function typingNames(ids: string[], avatars: AvatarDto[]): string {
-  const names = ids.map((id) => avatars.find((a) => a.id === id)?.name ?? '?');
+  const names = ids.map((id) => {
+    const a = avatars.find((x) => x.id === id);
+    return a ? shownName(a) : '?';
+  });
   return names.length > 2 ? `${names.slice(0, 2).join('、')} 等 ${names.length} 人` : names.join('、');
 }
 
@@ -184,8 +197,8 @@ function GroupImage({
   const small = Math.round(size * 0.68);
   return (
     <span className="group-image" style={{ width: size, height: size }} aria-hidden>
-      <AvatarImage name={members[0]!.name} src={members[0]!.imageUrl} size={small} />
-      <AvatarImage name={members[1]!.name} src={members[1]!.imageUrl} size={small} />
+      <AvatarImage name={shownName(members[0]!)} src={members[0]!.imageUrl} size={small} />
+      <AvatarImage name={shownName(members[1]!)} src={members[1]!.imageUrl} size={small} />
     </span>
   );
 }
@@ -209,7 +222,10 @@ function ChatItem({
     last?.senderType === 'user'
       ? '你'
       : c.type === 'group' && last?.senderAvatarId
-        ? avatars.find((a) => a.id === last.senderAvatarId)?.name
+        ? (() => {
+            const a = avatars.find((x) => x.id === last.senderAvatarId);
+            return a && shownName(a);
+          })()
         : undefined;
   const preview = last ? `${senderName ? `${senderName}：` : ''}${messagePreview(last)}` : '還沒有訊息';
   const typingText = c.type === 'group' ? `${typingNames(typingIds, avatars)} 輸入中…` : '輸入中…';
@@ -344,7 +360,7 @@ function ChatView({
             <p>傳一則訊息打個招呼吧。</p>
             {dmAvatar && !dmAvatar.llm && (
               <p className="hint">
-                {dmAvatar.name} 還沒有綁定 LLM，<Link to={`/avatars/${dmAvatar.id}`}>先去設定大腦</Link>。
+                {shownName(dmAvatar)} 還沒有綁定 LLM，<Link to={`/avatars/${dmAvatar.id}`}>先去設定大腦</Link>。
               </p>
             )}
           </div>
@@ -375,9 +391,9 @@ function TypingBubble({ avatar }: { avatar?: AvatarDto }) {
   return (
     <div className="msg msg-theirs" aria-live="polite">
       <span className="msg-avatar">
-        <AvatarImage name={avatar?.name ?? '?'} src={avatar?.imageUrl ?? null} size={32} />
+        <AvatarImage name={avatar ? shownName(avatar) : '?'} src={avatar?.imageUrl ?? null} size={32} />
       </span>
-      <div className="msg-bubble typing-bubble" aria-label={`${avatar?.name ?? ''} 正在輸入`}>
+      <div className="msg-bubble typing-bubble" aria-label={`${avatar ? shownName(avatar) : ''} 正在輸入`}>
         <span />
         <span />
         <span />
@@ -445,11 +461,11 @@ function MessageList({
               <div className={`msg ${mine ? 'msg-mine' : 'msg-theirs'}${grouped ? ' msg-grouped' : ''}`}>
                 {!mine && (
                   <span className="msg-avatar">
-                    {!grouped && <AvatarImage name={sender?.name ?? '?'} src={sender?.imageUrl ?? null} size={32} />}
+                    {!grouped && <AvatarImage name={sender ? shownName(sender) : '?'} src={sender?.imageUrl ?? null} size={32} />}
                   </span>
                 )}
                 <div className="msg-content">
-                  {isGroup && !mine && !grouped && <div className="msg-sender">{sender?.name ?? '（已刪除）'}</div>}
+                  {isGroup && !mine && !grouped && <div className="msg-sender">{sender ? shownName(sender) : '（已刪除）'}</div>}
                   {showThoughts && (m.innerThought || m.traceId) && (
                     <div className="thought">
                       {m.innerThought && <>💭 {m.innerThought}</>}
@@ -664,8 +680,9 @@ function InfoPanel({
       {avatar ? (
         <div className="info-body">
           <div className="info-hero">
-            <AvatarImage name={avatar.name} src={avatar.imageUrl} size={96} />
-            <h2>{avatar.name}</h2>
+            <AvatarImage name={shownName(avatar)} src={avatar.imageUrl} size={96} />
+            <h2>{shownName(avatar)}</h2>
+            {shownName(avatar) !== avatar.name && <p className="hint">本名 {avatar.name}</p>}
             {avatar.bio && <p className="info-bio">{avatar.bio}</p>}
             <Link className="btn" to={`/avatars/${avatar.id}`}>
               編輯設定
@@ -744,20 +761,20 @@ function GroupInfo({
           return (
             <li key={a.id}>
               <span className="avatar-wrap">
-                <AvatarImage name={a.name} src={a.imageUrl} size={36} />
+                <AvatarImage name={shownName(a)} src={a.imageUrl} size={36} />
                 <StatusDot avatar={a} />
               </span>
               <span className="member-text">
-                <span className="member-name">{a.name}</span>
+                <span className="member-name">{shownName(a)}</span>
                 <span className="hint">
                   {a.llm ? `${STATUS_LABELS[status]}${activity ? `・${activity}` : ''}` : '沒有綁定 LLM'}
                 </span>
               </span>
-              <button className="icon-btn icon-btn-small" onClick={() => onMention(a.name)} title={`@${a.name}`} aria-label={`點名 ${a.name}`}>
+              <button className="icon-btn icon-btn-small" onClick={() => onMention(shownName(a))} title={`@${shownName(a)}`} aria-label={`點名 ${shownName(a)}`}>
                 @
               </button>
               {dm && (
-                <Link className="icon-btn icon-btn-small" to={`/chats/${dm}`} title="私訊" aria-label={`和 ${a.name} 私訊`}>
+                <Link className="icon-btn icon-btn-small" to={`/chats/${dm}`} title="私訊" aria-label={`和 ${shownName(a)} 私訊`}>
                   <Icon name="chat" size={16} />
                 </Link>
               )}

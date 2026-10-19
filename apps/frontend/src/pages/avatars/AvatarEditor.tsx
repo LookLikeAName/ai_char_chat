@@ -15,6 +15,7 @@ import {
   type InitialStage,
   type LlmBinding,
   INITIAL_STAGES,
+  shownName,
   STAGE_LABELS,
 } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
@@ -51,6 +52,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   const [exporting, setExporting] = useState(false);
   const [photo, setPhoto] = useState<AvatarPhoto>(avatar?.photo ?? DEFAULT_AVATAR_PHOTO);
   const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
+  const [displayName, setDisplayName] = useState(avatar?.displayName ?? '');
   const [links, setLinks] = useState<AvatarLink[]>(avatar?.links ?? []);
   const linksOk = links.every((l) => l.relation.trim());
   const { data: state } = useQuery({
@@ -65,6 +67,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   const dirty =
     !!avatar &&
     (p.name !== avatar.name ||
+      displayName.trim() !== avatar.displayName ||
       p.bio !== avatar.bio ||
       !deepEqual(llm, avatar.llm) ||
       tokenLimit !== avatar.dailyTokenLimit ||
@@ -104,6 +107,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
         if (canSave) {
           save.mutate({
             name: p.name,
+            displayName,
             bio: p.bio,
             llm,
             persona: p.persona,
@@ -120,7 +124,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
         <Link to="/avatars" className="icon-btn only-narrow" aria-label="返回列表">
           <Icon name="back" />
         </Link>
-        <h1>{avatar ? `編輯 ${avatar.name}` : '新增 avatar'}</h1>
+        <h1>{avatar ? `編輯 ${shownName(avatar)}` : '新增 avatar'}</h1>
         {avatar && (
           <>
             <button type="button" className="btn btn-ghost" onClick={() => setExporting(true)}>
@@ -156,8 +160,20 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
           <section className="card">
             <h2>名字與簡介</h2>
             <label className="field">
-              <span className="field-label">名字</span>
+              <span className="field-label">本名</span>
               <input value={p.name} onChange={(e) => setP({ ...p, name: e.target.value })} maxLength={40} required />
+            </label>
+            <label className="field">
+              <span className="field-label">顯示名稱</span>
+              <input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={40}
+                placeholder={p.name ? `跟本名一樣（${p.name}）` : '跟本名一樣'}
+              />
+              <span className="hint">
+                通訊軟體上的名字，例如暱稱或帳號名稱。聊天列表與群組裡都顯示這個；它自己知道本名，要不要告訴還不熟的人，依個性和關係決定。
+              </span>
             </label>
             <label className="field">
               <span className="field-label">簡介</span>

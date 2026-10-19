@@ -20,6 +20,7 @@ const imageSchema = z.object({
 
 export const avatarCardSchema = z.object({
   name: z.string().trim().min(1).max(40),
+  displayName: z.string().trim().max(40).default(''),
   bio: z.string().max(500).default(''),
   persona: z.record(z.string(), z.unknown()).default({}),
   personaLocks: z.array(z.string()).default([]),

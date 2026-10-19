@@ -27,7 +27,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       .select({
         conversationId: conversationMembers.conversationId,
         avatarId: avatars.id,
-        name: avatars.name,
+        name: sql<string>`coalesce(nullif(${avatars.displayName}, ''), ${avatars.name})`,
         imagePath: avatars.imagePath,
         seenUpTo: conversationMembers.seenUpTo,
       })

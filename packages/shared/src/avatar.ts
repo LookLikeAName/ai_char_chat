@@ -18,8 +18,16 @@ export const avatarLinkSchema = z.object({
 export type AvatarLink = z.infer<typeof avatarLinkSchema>;
 export const MAX_AVATAR_LINKS = 12;
 
+/** 畫面上顯示的名字：有設定顯示名稱就用它，否則用本名 */
+export function shownName(a: { name: string; displayName?: string | null }): string {
+  return a.displayName?.trim() || a.name;
+}
+
 export const avatarInputSchema = z.object({
+  /** 本名 */
   name: z.string().trim().min(1).max(40),
+  /** 通訊軟體上的顯示名稱（暱稱、帳號名）；空字串表示和本名一樣；省略表示不變更 */
+  displayName: z.string().trim().max(40).optional(),
   bio: z.string().trim().max(500).default(''),
   llm: llmBindingSchema.nullable().default(null),
   /**
@@ -45,7 +53,10 @@ export type AvatarInput = z.infer<typeof avatarInputSchema>;
 
 export interface AvatarDto {
   id: string;
+  /** 本名 */
   name: string;
+  /** 顯示名稱；空字串表示和本名一樣（畫面上用 shownName） */
+  displayName: string;
   bio: string;
   /** 例如 /media/avatars/xxx.webp；沒有上傳時為 null */
   imageUrl: string | null;

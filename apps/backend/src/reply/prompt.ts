@@ -29,7 +29,10 @@ import { renderPersona } from '../persona/describe.ts';
 import { describePreferences, describeResults } from '../profile/describe.ts';
 
 export interface PromptAvatar {
+  /** 本名 */
   name: string;
+  /** 通訊軟體上的顯示名稱；空的表示和本名一樣 */
+  displayName?: string;
   bio: string;
   persona: PersonaDraft;
 }
@@ -57,7 +60,7 @@ export interface PromptGroup {
   /** 自己的 avatar id */
   selfId: string;
   /** 其他成員（不含自己） */
-  members: { id: string; name: string; bio: string; relationship?: RelationshipState; relation?: string }[];
+  members: { id: string; name: string; displayName?: string; bio: string; relationship?: RelationshipState; relation?: string }[];
   /** 玩家在群組裡的名字 */
   userName: string;
   /** 自己的口風（0 大嘴巴～100 守口如瓶） */
@@ -71,6 +74,7 @@ export interface PromptGroup {
 /** 相關的角色（玩家設定的，例如同事）：avatar 生活裡認識的人 */
 export interface PromptAcquaintance {
   name: string;
+  displayName?: string;
   relation: string;
   bio: string;
   occupation?: string;
@@ -153,6 +157,22 @@ export function formatGap(ms: number): string {
   return `${Math.round(hours / 24)} 天`;
 }
 
+/** 在通訊軟體上看到的名字 */
+function shown(a: { name: string; displayName?: string }): string {
+  return a.displayName?.trim() || a.name;
+}
+
+/** 還不認識的成員：只看得到顯示名稱 */
+function isStranger(m: PromptGroup['members'][number]): boolean {
+  return m.relationship?.stage === 'stranger' && !m.relation;
+}
+
+/** 群組裡怎麼稱呼這個成員：認識的話也知道本名 */
+function memberLabel(m: PromptGroup['members'][number]): string {
+  const dn = shown(m);
+  return dn !== m.name && !isStranger(m) ? `${dn}（本名${m.name}）` : dn;
+}
+
 /** 完整的人格設定；還沒建立（或不完整）時回傳 null，只用簡介 */
 export function completePersona(draft: PersonaDraft): Persona | null {
   const r = personaSchema.safeParse(draft);
@@ -179,9 +199,14 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
     ? `${persona.relationship.withUser}\n你稱呼對方「${persona.relationship.callsUser}」。`
     : '你們的關係還沒有特別設定：就當作透過朋友認識不久、正在慢慢熟悉的人。';
 
+  const handle = shown(avatar) !== avatar.name ? shown(avatar) : '';
+  const self = `你是「${avatar.name}」${handle ? `（通訊軟體上的顯示名稱是「${handle}」）` : ''}`;
   const opening = group
-    ? `你是「${avatar.name}」，正在通訊軟體的群組「${group.title}」裡聊天。群組裡有你、對方（${group.userName}），還有${group.members.map((m) => `「${m.name}」`).join('、')}。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`
-    : `你是「${avatar.name}」，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`;
+    ? `${self}，正在通訊軟體的群組「${group.title}」裡聊天。群組裡有你、對方（${group.userName}），還有${group.members.map((m) => `「${shown(m)}」`).join('、')}。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`
+    : `${self}，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`;
+  const nameRule = handle
+    ? `\n- 大家在通訊軟體上看到的是你的顯示名稱「${handle}」。還不熟的人不一定知道你的本名「${avatar.name}」；要不要說、什麼時候說，依你的個性和你們的關係決定。`
+    : '';
 
   return `${opening}
 
@@ -195,7 +220,7 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
 - 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
-- 不要捏造對方沒說過的事；不知道就問。
+- 不要捏造對方沒說過的事；不知道就問。${nameRule}
 - 對方傳來的圖片會附在訊息裡，或用［］寫出內容；像真人一樣對它有反應。看不到內容就直接問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
 - 除非你的設定另有指定，用繁體中文（台灣用語）。${group ? GROUP_RULES : ''}
 - ${content}
@@ -269,14 +294,14 @@ function groupSection(g: PromptGroup): string {
   const lines = [`## 群組成員`];
   for (const m of g.members) {
     const r = m.relationship;
-    // 還不認識的人：只知道名字和他在群組裡說過的話
-    const unknown = r?.stage === 'stranger' && !m.relation;
+    // 還不認識的人：只知道顯示名稱和他在群組裡說過的話
+    const unknown = isStranger(m);
     lines.push(
-      `- ${m.name}：${unknown ? '（還不認識，只知道名字）' : m.bio || '（沒有簡介）'}${m.relation ? `\n  你們是：${m.relation}` : ''}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`,
+      `- ${memberLabel(m)}：${unknown ? '（還不認識，只知道名字）' : m.bio || '（沒有簡介）'}${m.relation ? `\n  你們是：${m.relation}` : ''}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`,
     );
   }
-  const strangers = g.members.filter((m) => m.relationship?.stage === 'stranger').map((m) => m.name);
-  const newcomers = g.members.filter((m) => m.relationship?.stage === 'acquaintance' && !m.relation).map((m) => m.name);
+  const strangers = g.members.filter((m) => m.relationship?.stage === 'stranger').map(shown);
+  const newcomers = g.members.filter((m) => m.relationship?.stage === 'acquaintance' && !m.relation).map(shown);
   if (strangers.length) {
     lines.push(
       '',
@@ -305,7 +330,8 @@ function acquaintanceSection(list: PromptAcquaintance[] | undefined, group: Prom
   if (!others.length) return '';
   const lines = others.map((a) => {
     const about = [a.occupation, a.traits?.length ? a.traits.join('、') : ''].filter(Boolean).join('；');
-    return `- ${a.name}：${a.relation}${a.stage ? `（你們現在：${STAGE_LABELS[a.stage]}）` : ''}${a.bio ? `\n  ${a.bio}` : ''}${about ? `（${about}）` : ''}`;
+    const dn = a.displayName?.trim();
+    return `- ${a.name}${dn && dn !== a.name ? `（顯示名稱：${dn}）` : ''}：${a.relation}${a.stage ? `（你們現在：${STAGE_LABELS[a.stage]}）` : ''}${a.bio ? `\n  ${a.bio}` : ''}${about ? `（${about}）` : ''}`;
   });
   return `
 ## 你生活裡認識的人
@@ -406,7 +432,10 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
     // 群組：自己說的是 assistant；玩家與其他成員說的都是 user，前面標上名字
     const mine = m.senderType === 'avatar' && (!group || m.senderAvatarId === group.selfId);
     const role = mine ? 'assistant' : 'user';
-    const who = !group || mine ? '' : m.senderType === 'user' ? group.userName : (group.members.find((x) => x.id === m.senderAvatarId)?.name ?? '某位成員');
+    const who = !group || mine ? '' : m.senderType === 'user' ? group.userName : (() => {
+            const x = group.members.find((y) => y.id === m.senderAvatarId);
+            return x ? shown(x) : '某位成員';
+          })();
     let last = turns.at(-1);
     if (!last || last.role !== role) turns.push((last = { role, parts: [], photos: [] }));
 

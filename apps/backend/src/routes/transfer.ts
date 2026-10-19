@@ -54,6 +54,7 @@ export async function transferRoutes(app: FastifyInstance) {
     };
     const out: AvatarCard = {
       name: row.name,
+      displayName: row.displayName,
       bio: row.bio,
       persona: row.persona as Record<string, unknown>,
       personaLocks: row.personaLocks,
@@ -177,6 +178,7 @@ export async function transferRoutes(app: FastifyInstance) {
             .insert(avatars)
             .values({
               name: c.name,
+              displayName: c.displayName,
               bio: c.bio,
               imagePath,
               persona,
