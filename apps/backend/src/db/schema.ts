@@ -87,6 +87,12 @@ export const conversations = pgTable('conversations', {
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
   /** 玩家最後看過這個對話的時間，用來算未讀數 */
   userReadAt: timestamp('user_read_at', { withTimezone: true, precision: 3 }),
+  /** 群組：這一輪什麼時候開始（玩家發話後等幾秒；玩家還在打字就延後） */
+  turnDueAt: timestamp('turn_due_at', { withTimezone: true, precision: 3 }),
+  /** 群組：玩家最後一次在輸入框打字的時間 */
+  userTypingAt: timestamp('user_typing_at', { withTimezone: true, precision: 3 }),
+  /** 群組：已經處理（輪過）的玩家訊息到這個時間點 */
+  handledUpTo: timestamp('handled_up_to', { withTimezone: true, precision: 3 }),
   ...timestamps,
 });
 

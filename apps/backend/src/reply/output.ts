@@ -10,6 +10,8 @@ export interface ReplyOutput {
   affinityDelta: number;
   trustDelta: number;
   event: { type: RelationshipEventType; note: string } | null;
+  /** 群組：對其他成員的好感變化（名字 → 變化量） */
+  othersAffinity: Record<string, number>;
   /** 產生這個輸出的 LLM 呼叫（監控用） */
   traceId?: string | null;
 }
@@ -26,7 +28,18 @@ const outputSchema = z.object({
   affinity_delta: z.unknown().optional(),
   trust_delta: z.unknown().optional(),
   relationship_event: z.unknown().optional(),
+  others_affinity: z.unknown().optional(),
 });
+
+function othersAffinity(v: unknown): Record<string, number> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const out: Record<string, number> = {};
+  for (const [name, d] of Object.entries(v as Record<string, unknown>)) {
+    const n = delta(d);
+    if (n) out[name] = n;
+  }
+  return out;
+}
 
 function delta(v: unknown): number {
   const n = Number(v);
@@ -76,6 +89,7 @@ export function parseReplyOutput(text: string, opts: { allowEmpty?: boolean } = 
     affinityDelta: delta(parsed.data.affinity_delta),
     trustDelta: delta(parsed.data.trust_delta),
     event: parseEvent(parsed.data.relationship_event),
+    othersAffinity: othersAffinity(parsed.data.others_affinity),
   };
 }
 
@@ -87,5 +101,5 @@ export function plainTextFallback(text: string): ReplyOutput | null {
   const t = text.trim();
   if (!t || /[{}[\]]/.test(t.slice(0, 2)) || /"messages"\s*:/.test(t)) return null;
   const messages = clean(t.split(/\n\s*\n/));
-  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null } : null;
+  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null, othersAffinity: {} } : null;
 }

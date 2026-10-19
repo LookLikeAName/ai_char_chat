@@ -11,7 +11,11 @@ export type AgentJob =
   /** 每 15 分鐘：產生今天的生活日誌、決定要不要主動傳訊息 */
   | { kind: 'proactive.tick' }
   /** 主動傳訊息給玩家 */
-  | { kind: 'proactive'; avatarId: string; conversationId: string };
+  | { kind: 'proactive'; avatarId: string; conversationId: string }
+  /** 群組：玩家發話後的一輪（重複投遞是安全的） */
+  | { kind: 'group.turn'; conversationId: string; force?: boolean }
+  /** 群組：某個 avatar 主動開話題 */
+  | { kind: 'group.proactive'; conversationId: string; avatarId: string };
 
 export interface JobQueue {
   add(job: AgentJob, opts?: { delayMs?: number }): Promise<void>;

@@ -102,3 +102,35 @@ export async function scheduleReply(
   await jobs.add({ kind: 'reply', conversationId }, { delayMs: Math.max(0, plan.at.getTime() - now.getTime()) });
   return plan;
 }
+
+/** 群組：玩家發話後等一下再開始這一輪（連續發話會一直延後），讓大家不會同時搶著回 */
+export function groupDebounceMs(pacing: 'realistic' | 'relaxed' | 'instant', random: Random): number {
+  return pacing === 'instant' ? 800 + random() * 700 : 3000 + random() * 5000;
+}
+
+export async function scheduleGroupTurn(
+  db: Db,
+  jobs: JobQueue,
+  conversationId: string,
+  opts: { now?: Date; random?: Random } = {},
+): Promise<Date | null> {
+  const now = opts.now ?? new Date();
+  const random = opts.random ?? Math.random;
+  const [conv] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
+  if (!conv || conv.type !== 'group') return null;
+  const settings = await loadSettings(db);
+  const delay = groupDebounceMs(settings.replyPacing, random);
+  const due = new Date(now.getTime() + delay);
+  // 和一對一不同：每則新訊息都把開始時間往後延，等玩家講完
+  await db.update(conversations).set({ turnDueAt: due }).where(eq(conversations.id, conversationId));
+  await jobs.add({ kind: 'group.turn', conversationId }, { delayMs: delay });
+  await logEvent({
+    category: 'group',
+    type: 'group.scheduled',
+    level: 'debug',
+    conversationId,
+    message: `群組「${conv.title ?? ''}」：${(delay / 1000).toFixed(1)} 秒後開始這一輪`,
+    data: { due: due.toISOString() },
+  });
+  return due;
+}

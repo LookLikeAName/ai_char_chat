@@ -61,7 +61,12 @@ export async function extractMemories(
   if (!settings.utilityLlm) throw new HttpError(400, '沒有系統工具模型，無法整理記憶');
 
   const avatar = member.avatar;
-  const names = new Map<string, string>([[avatar.id, avatar.name]]);
+  const others = await db
+    .select({ id: avatars.id, name: avatars.name })
+    .from(conversationMembers)
+    .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
+    .where(eq(conversationMembers.conversationId, conversationId));
+  const names = new Map<string, string>(others.map((o) => [o.id, o.name]));
   const transcript = rows
     .map((m) => {
       const who = m.senderType === 'user' ? '對方' : m.senderAvatarId === avatar.id ? '我' : (names.get(m.senderAvatarId ?? '') ?? '其他人');
@@ -70,7 +75,8 @@ export async function extractMemories(
     .join('\n');
   const impression = await latestImpression(db, avatar.id);
 
-  const content = `你是「${avatar.name}」（${avatar.bio || '沒有簡介'}）。下面是你和對方最近的聊天紀錄。
+  const where = member.type === 'group' ? '在群組裡和大家' : '和對方';
+  const content = `你是「${avatar.name}」（${avatar.bio || '沒有簡介'}）。下面是你${where}最近的聊天紀錄。
 ${impression ? `\n你原本對對方的印象：${impression.content}\n` : ''}
 # 聊天紀錄（「我」是你，「對方」是玩家）
 ${transcript}

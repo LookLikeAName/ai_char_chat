@@ -33,8 +33,16 @@ export interface ConversationDto {
   unreadCount: number;
   /** 一對一時：avatar 已讀到哪個時間點（含） */
   seenUpTo: string | null;
+  /** 每個成員已讀到哪裡（群組顯示「已讀 N」） */
+  members: { avatarId: string; seenUpTo: string | null }[];
 }
 
 export const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(4000),
 });
+
+export const groupInputSchema = z.object({
+  title: z.string().trim().min(1).max(40),
+  avatarIds: z.array(z.uuid()).min(2, '群組至少要有 2 個 avatar').max(8),
+});
+export type GroupInput = z.infer<typeof groupInputSchema>;

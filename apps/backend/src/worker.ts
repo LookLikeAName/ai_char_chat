@@ -38,6 +38,9 @@ const engine = new ReplyEngine({
   box,
   events,
   lock,
+  enqueue: async (job, delay) => {
+    await queue.add(job.kind, job, { ...REPLY_JOB_OPTIONS, ...KEEP, delay });
+  },
   // 每次回覆後排一次記憶萃取；只有最後一次（對話真的停下來後）會有事做
   onReplied: async (avatarId, conversationId) => {
     await queue.add('memory.extract', { kind: 'memory.extract', avatarId, conversationId }, {
@@ -109,6 +112,13 @@ const worker = new Worker<AgentJob>(
       }
       case 'proactive':
         return engine.handleProactive(data.conversationId);
+      case 'group.turn': {
+        const result = await engine.handleGroupTurn(data.conversationId, { force: data.force });
+        if (result === 'busy') await queue.add('group.turn', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
+        return result;
+      }
+      case 'group.proactive':
+        return engine.handleGroupProactive(data.conversationId, data.avatarId);
     }
   },
   // 每個對話有自己的鎖，不同對話可以同時處理
@@ -128,7 +138,7 @@ worker.on('failed', (job, err) => {
     data: { jobId: job?.id, data: job?.data, stack: err.stack?.split('\n').slice(0, 6) },
   });
   if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
-  if (job.data.kind === 'reply') {
+  if (job.data.kind === 'reply' || job.data.kind === 'group.turn') {
     engine.reportFailure(job.data.conversationId, err).catch((e) => console.error('[worker] 無法寫入失敗訊息：', e));
   }
 });

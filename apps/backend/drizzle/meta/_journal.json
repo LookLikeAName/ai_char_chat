@@ -57,6 +57,13 @@
       "when": 1792401129169,
       "tag": "0007_observability",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792402069191,
+      "tag": "0008_groups",
+      "breakpoints": true
     }
   ]
 }

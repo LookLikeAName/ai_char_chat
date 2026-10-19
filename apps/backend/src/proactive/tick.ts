@@ -97,6 +97,8 @@ export async function proactiveTick(
     await enqueue({ kind: 'proactive', avatarId: avatar.id, conversationId }, Math.round(random() * SPREAD_MS));
     decisions.push({ avatarId: avatar.id, action: 'enqueued', reason: '決定主動傳訊息', chance });
   }
+  decisions.push(...(await groupTick(db, settings, enqueue, now, random, clock, states)));
+
   await logEvent({
     category: 'proactive',
     type: 'proactive.tick',
@@ -105,10 +107,68 @@ export async function proactiveTick(
     data: {
       decisions: decisions.map((d) => ({
         ...d,
-        name: rows.find((r) => r.avatar.id === d.avatarId)?.avatar.name,
+        name: rows.find((r) => r.avatar.id === d.avatarId)?.avatar.name ?? d.avatarId,
         chance: d.chance === undefined ? undefined : Math.round(d.chance * 1000) / 1000,
       })),
     },
   });
   return decisions;
+}
+
+/** 群組沉寂超過這麼久，才會有人想開話題 */
+const GROUP_QUIET_MS = 2 * 60 * 60 * 1000;
+
+/** 群組：沉寂一陣子後，可能有人主動開話題（算在那個 avatar 的每日次數裡） */
+async function groupTick(
+  db: Db,
+  settings: AppSettings,
+  enqueue: (job: AgentJob, delayMs: number) => Promise<void>,
+  now: Date,
+  random: () => number,
+  clock: ReturnType<typeof localClock>,
+  states: (typeof avatarState.$inferSelect)[],
+): Promise<TickDecision[]> {
+  const out: TickDecision[] = [];
+  if (!settings.proactive.enabled) return out;
+  if (settings.quietHours.enabled && inTimeRange(clock.hhmm, settings.quietHours.start, settings.quietHours.end)) return out;
+  const groups = await db.select().from(conversations).where(eq(conversations.type, 'group'));
+  for (const g of groups) {
+    const [last] = await db
+      .select({ senderType: messages.senderType, meta: messages.meta, createdAt: messages.createdAt })
+      .from(messages)
+      .where(and(eq(messages.conversationId, g.id), inArray(messages.senderType, ['user', 'avatar'])))
+      .orderBy(desc(messages.createdAt), desc(messages.seq))
+      .limit(1);
+    // 有人剛說過話、或上一個話題沒人理（玩家還沒回）就不開新的
+    if (last && (now.getTime() - last.createdAt.getTime() < GROUP_QUIET_MS || last.meta.proactive)) continue;
+    const members = await db
+      .select({ avatar: avatars })
+      .from(conversationMembers)
+      .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
+      .where(eq(conversationMembers.conversationId, g.id));
+    const chances: { id: string; chance: number }[] = [];
+    for (const { avatar } of members) {
+      if (!avatar.llm) continue;
+      const st = states.find((s) => s.avatarId === avatar.id);
+      if ((st?.proactiveDate === clock.date ? st.proactiveCount : 0) >= settings.proactive.dailyLimit) continue;
+      const rel = await getRelationship(db, avatar.id);
+      const chance =
+        0.5 *
+        proactiveChance({
+          availability: availabilityAt(avatar.persona, now, settings.timezone),
+          stage: rel.stage,
+          extraversion: avatar.persona.personality?.bigFive?.extraversion ?? 50,
+          sinceLastMessageMs: last ? now.getTime() - last.createdAt.getTime() : null,
+        });
+      if (chance > 0) chances.push({ id: avatar.id, chance });
+    }
+    // 至少一個人想開話題的機率；再依各自的機率挑一個人
+    const total = 1 - chances.reduce((p, c) => p * (1 - c.chance), 1);
+    if (!chances.length || random() >= total) continue;
+    let r = random() * chances.reduce((s, c) => s + c.chance, 0);
+    const who = chances.find((c) => (r -= c.chance) <= 0) ?? chances.at(-1)!;
+    await enqueue({ kind: 'group.proactive', conversationId: g.id, avatarId: who.id }, Math.round(random() * SPREAD_MS));
+    out.push({ avatarId: who.id, action: 'enqueued', reason: `在群組「${g.title ?? ''}」開話題`, chance: total });
+  }
+  return out;
 }

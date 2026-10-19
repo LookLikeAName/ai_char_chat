@@ -182,9 +182,12 @@ export async function debugRoutes(app: FastifyInstance) {
   /** 如果現在回覆（或主動發話），會送出什麼 prompt；不會呼叫 LLM */
   app.get('/debug/preview/:id', async (req) => {
     const { id } = parseBody(idParams, req.params);
-    const { mode } = parseBody(z.object({ mode: z.enum(['reply', 'proactive']).default('reply') }), req.query);
-    const preview = await engine.previewPrompt(id, mode);
-    if (!preview) throw notFound('對話（目前只支援一對一）');
+    const { mode, avatarId } = parseBody(
+      z.object({ mode: z.enum(['reply', 'proactive']).default('reply'), avatarId: z.uuid().optional() }),
+      req.query,
+    );
+    const preview = await engine.previewPrompt(id, mode, avatarId);
+    if (!preview) throw notFound('對話（群組請指定成員）');
     return preview;
   });
 

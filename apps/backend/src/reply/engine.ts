@@ -9,16 +9,26 @@
 // 產生或打字期間玩家又傳了訊息：還沒送出任何一則就整輪重來（連同新訊息一起回）；
 // 已經送出幾則就停在這裡，下一輪再回新訊息。
 import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
-import { localClock, type AppSettings } from '@acc/shared';
+import {
+  addressesEveryone,
+  availabilityAt,
+  chooseSpeakers,
+  GROUP_MESSAGE_BUDGET,
+  localClock,
+  mentions,
+  type AppSettings,
+  type SpeakerCandidate,
+} from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
 import { avatars, avatarState, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
 import type { FetchFn } from '../llm/index.ts';
 import { getLifeLog } from '../life/lifeLog.ts';
+import type { AgentJob } from '../jobs.ts';
 import type { Lock } from '../lock.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
-import { latestImpression, retrieveMemories } from '../memory/store.ts';
+import { bigramSimilarity, latestImpression, retrieveMemories } from '../memory/store.ts';
 import { attachParsed, logEvent, withScope } from '../observability.ts';
 import { loadProfile } from '../profile/service.ts';
 import { applyInteraction, getMood, getRelationship, setMood } from '../relationship/service.ts';
@@ -26,7 +36,8 @@ import { callWithBinding } from '../services/llmCall.ts';
 import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
-import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptSituation } from './prompt.ts';
+import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptGroup, type PromptSituation } from './prompt.ts';
+import { ACTIVE_WINDOW_MS } from './planner.ts';
 import { betweenMessagesMs, readPauseMs, typingMs, type Random } from './timing.ts';
 
 export interface ReplyEngineDeps {
@@ -36,6 +47,8 @@ export interface ReplyEngineDeps {
   lock: Lock;
   /** 回覆完成後呼叫（排程記憶萃取） */
   onReplied?: (avatarId: string, conversationId: string) => Promise<void>;
+  /** 群組：玩家還在打字時，延後這一輪 */
+  enqueue?: (job: AgentJob, delayMs: number) => Promise<void>;
   fetchFn?: FetchFn;
   sleep?: (ms: number) => Promise<void>;
   random?: Random;
@@ -46,6 +59,7 @@ type Outcome = { kind: 'restart' } | { kind: 'sent' | 'interrupted'; output: Rep
 
 interface Ctx {
   conversationId: string;
+  type: 'dm' | 'group';
   avatar: typeof avatars.$inferSelect;
   handledUpTo: Date | null;
   seenUpTo: Date | null;
@@ -57,6 +71,9 @@ const LOCK_TTL_MS = 3 * 60 * 1000;
 /** 玩家一直連續傳訊息時，一次工作最多重來幾輪；剩下的交給後面的工作 */
 const MAX_ROUNDS = 4;
 const HISTORY_LOAD = 120;
+
+/** 群組：玩家最後一次打字後這麼久內，當作還在打字 */
+const TYPING_GRACE_MS = 3000;
 
 const FORMAT_REMINDER = '（系統提醒：上一次的輸出不是指定的 JSON。請只輸出 {"inner_thought": "...", "messages": ["..."]}。）';
 
@@ -268,6 +285,254 @@ export class ReplyEngine {
     return first ? Math.max(0, now.getTime() - first.createdAt.getTime()) : 0;
   }
 
+  /**
+   * 群組的一輪：玩家發話（並停止打字）後，決定誰回、依序產生。
+   * 後回的人看得到前面的人說了什麼；一輪最多 GROUP_MESSAGE_BUDGET 則；回覆裡點名的人會接著回。
+   */
+  async handleGroupTurn(conversationId: string, opts: { force?: boolean } = {}): Promise<'busy' | 'done' | 'early'> {
+    return withScope({ conversationId }, () => this.groupTurnInner(conversationId, opts));
+  }
+
+  private async groupTurnInner(conversationId: string, opts: { force?: boolean }): Promise<'busy' | 'done' | 'early'> {
+    const db = this.deps.db;
+    const key = `group:${conversationId}`;
+    const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
+    if (!token) return 'busy';
+    let typing: string | null = null;
+    const setTyping = async (avatarId: string, on: boolean) => {
+      typing = on ? avatarId : null;
+      await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: on });
+    };
+    try {
+      const [conv] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
+      if (!conv || conv.type !== 'group') return 'done';
+      const now = this.now();
+      if (!opts.force && conv.turnDueAt && now.getTime() < conv.turnDueAt.getTime() - 500) return 'early';
+      // 玩家還在打字：等他打完
+      if (!opts.force && conv.userTypingAt && now.getTime() - conv.userTypingAt.getTime() < TYPING_GRACE_MS && this.deps.enqueue) {
+        await db.update(conversations).set({ turnDueAt: new Date(now.getTime() + TYPING_GRACE_MS) }).where(eq(conversations.id, conversationId));
+        await this.deps.enqueue({ kind: 'group.turn', conversationId }, TYPING_GRACE_MS);
+        await logEvent({ category: 'group', type: 'group.wait', level: 'debug', message: '玩家還在打字，這一輪延後 3 秒' });
+        return 'early';
+      }
+      const snapshot = await this.latestUserMessageAt(conversationId);
+      if (!snapshot || (conv.handledUpTo && snapshot <= conv.handledUpTo)) return 'done';
+
+      const unanswered = await db
+        .select({ content: messages.content })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.conversationId, conversationId),
+            eq(messages.senderType, 'user'),
+            conv.handledUpTo ? gt(messages.createdAt, conv.handledUpTo) : undefined,
+          ),
+        );
+      const text = unanswered.map((m) => m.content).join('\n');
+      const settings = await loadSettings(db);
+      const memberRows = await db
+        .select({ avatar: avatars })
+        .from(conversationMembers)
+        .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
+        .where(eq(conversationMembers.conversationId, conversationId));
+      const recent = await db
+        .select({ senderType: messages.senderType, senderAvatarId: messages.senderAvatarId, createdAt: messages.createdAt })
+        .from(messages)
+        .where(eq(messages.conversationId, conversationId))
+        .orderBy(desc(messages.createdAt), desc(messages.seq))
+        .limit(10);
+
+      const candidates: SpeakerCandidate[] = [];
+      for (const { avatar } of memberRows) {
+        if (!avatar.llm) continue;
+        const rel = await getRelationship(db, avatar.id);
+        const p = avatar.persona;
+        const interests = [p.preferences?.hobbies, p.preferences?.likes, p.preferences?.favoriteTopics, [p.basic?.occupation ?? '']]
+          .flat()
+          .filter(Boolean)
+          .join('、');
+        // 剛在群組裡說過話：正在聊天，當作在線
+        const chatting = recent.some(
+          (m) => m.senderAvatarId === avatar.id && now.getTime() - m.createdAt.getTime() < ACTIVE_WINDOW_MS,
+        );
+        const a = chatting ? { status: 'free' as const } : availabilityAt(p, now, settings.timezone);
+        candidates.push({
+          id: avatar.id,
+          name: avatar.name,
+          status: a.status,
+          extraversion: p.personality?.bigFive?.extraversion ?? 50,
+          affinity: rel.affinity,
+          relevance: interests ? Math.min(1, bigramSimilarity(text, interests) * 4) : 0,
+          recentMessages: recent.filter((m) => m.senderAvatarId === avatar.id).length,
+          mentioned: mentions(text, avatar.name),
+        });
+      }
+      const scored = chooseSpeakers(candidates, { random: this.random, forceOne: addressesEveryone(text) });
+      const queue = scored.filter((c) => c.chosen);
+      await logEvent({
+        category: 'group',
+        type: 'group.turn',
+        message: `群組「${conv.title ?? ''}」：${queue.length ? `${queue.map((c) => c.name).join('、')} 要回` : '這一輪沒人回'}`,
+        data: {
+          text,
+          candidates: scored.map((c) => ({
+            name: c.name,
+            score: Math.round(c.score * 100) / 100,
+            chosen: c.chosen,
+            why: c.why,
+            status: c.status,
+            relevance: Math.round(c.relevance * 100) / 100,
+            mentioned: c.mentioned,
+          })),
+        },
+      });
+
+      let budget = GROUP_MESSAGE_BUDGET;
+      const spoken: string[] = [];
+      let interrupted = false;
+      while (queue.length && budget > 0 && !interrupted) {
+        if (await this.hasNewerUserMessage(conversationId, snapshot)) {
+          interrupted = true;
+          break;
+        }
+        const cand = queue.shift()!;
+        const ctx = await this.loadContext(conversationId, cand.id);
+        if (!ctx) continue;
+        await this.markSeen(ctx, snapshot);
+        await this.sleep(readPauseMs(this.random));
+        await setTyping(cand.id, true);
+        const output = await this.generate(ctx, { mode: 'group', mentioned: cand.mentioned, before: [...spoken] });
+        if (!output.messages.length) {
+          await setTyping(cand.id, false);
+          await logEvent({
+            category: 'group',
+            type: 'group.silent',
+            avatarId: cand.id,
+            traceId: output.traceId,
+            message: `${cand.name}：看了訊息，這次決定不說話`,
+          });
+          continue;
+        }
+        const toSend = output.messages.slice(0, budget);
+        let sent = 0;
+        for (const [i, msg] of toSend.entries()) {
+          if (i > 0) await setTyping(cand.id, true);
+          await this.sleep(typingMs(msg, this.random, ctx.avatar.persona.speech?.typingSpeed));
+          if (await this.hasNewerUserMessage(conversationId, snapshot)) {
+            interrupted = true;
+            break;
+          }
+          await postMessage(db, this.deps.events, {
+            conversationId,
+            senderType: 'avatar',
+            senderAvatarId: cand.id,
+            content: msg,
+            meta: {
+              ...(output.traceId ? { traceId: output.traceId } : {}),
+              ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}),
+            },
+          });
+          sent++;
+          budget--;
+          await setTyping(cand.id, false);
+          if (i < toSend.length - 1) await this.sleep(betweenMessagesMs(this.random));
+        }
+        await setTyping(cand.id, false);
+        if (!sent) break;
+        spoken.push(cand.name);
+        await logEvent({
+          category: 'group',
+          type: 'group.sent',
+          avatarId: cand.id,
+          traceId: output.traceId,
+          message: `${cand.name} 在群組回了 ${sent} 則（這一輪還剩 ${budget} 則）`,
+          data: { messages: toSend.slice(0, sent) },
+        });
+        await this.applyState(ctx, output);
+        await this.deps.onReplied?.(cand.id, conversationId);
+        // 回覆裡點名了其他成員：額度還夠就讓他接著回
+        const said = toSend.slice(0, sent).join('\n');
+        for (const other of scored) {
+          if (other.id === cand.id || other.status === 'sleep' || spoken.includes(other.name)) continue;
+          if (queue.some((q) => q.id === other.id) || !mentions(said, other.name)) continue;
+          queue.push({ ...other, mentioned: true, chosen: true, why: `被${cand.name}點名` });
+          await logEvent({ category: 'group', type: 'group.chain', avatarId: other.id, message: `${cand.name} 點名了 ${other.name}，讓他接著回` });
+        }
+      }
+      if (interrupted) {
+        await logEvent({ category: 'group', type: 'group.interrupted', message: '玩家又發話了，這一輪停在這裡，下一輪接著回' });
+      }
+
+      // 沒在睡覺的成員都算看過了
+      for (const c of scored) {
+        if (c.status === 'sleep') continue;
+        await db
+          .update(conversationMembers)
+          .set({ seenUpTo: snapshot })
+          .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.avatarId, c.id)));
+      }
+      await db
+        .update(conversations)
+        .set({ handledUpTo: snapshot, turnDueAt: null })
+        .where(eq(conversations.id, conversationId));
+      await this.deps.events.publish({ type: 'conversations.changed' });
+      return 'done';
+    } finally {
+      if (typing) await setTyping(typing, false).catch(() => {});
+      await this.deps.lock.release(key, token);
+    }
+  }
+
+  /** 群組：某個 avatar 主動開話題（其他人等玩家回應才會接話） */
+  async handleGroupProactive(conversationId: string, avatarId: string): Promise<'busy' | 'skipped' | 'sent'> {
+    return withScope({ conversationId, avatarId }, async () => {
+      const key = `group:${conversationId}`;
+      const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
+      if (!token) return 'busy';
+      try {
+        const db = this.deps.db;
+        const [conv] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
+        const ctx = await this.loadContext(conversationId, avatarId);
+        if (!conv || conv.type !== 'group' || !ctx?.avatar.llm) return 'skipped';
+        const latestUser = await this.latestUserMessageAt(conversationId);
+        if (latestUser && (!conv.handledUpTo || latestUser > conv.handledUpTo)) return 'skipped';
+        const output = await this.generate(ctx, { mode: 'proactive' });
+        if (!output.messages.length) return 'skipped';
+        let sent = 0;
+        for (const [i, text] of output.messages.slice(0, 3).entries()) {
+          await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: true });
+          await this.sleep(typingMs(text, this.random, ctx.avatar.persona.speech?.typingSpeed));
+          await postMessage(db, this.deps.events, {
+            conversationId,
+            senderType: 'avatar',
+            senderAvatarId: avatarId,
+            content: text,
+            meta: {
+              proactive: true,
+              ...(output.traceId ? { traceId: output.traceId } : {}),
+              ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}),
+            },
+          });
+          await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: false });
+          sent++;
+        }
+        await logEvent({
+          category: 'proactive',
+          type: 'proactive.group',
+          traceId: output.traceId,
+          message: `${ctx.avatar.name} 在群組「${conv.title ?? ''}」開了話題`,
+          data: { messages: output.messages },
+        });
+        await this.bumpProactiveCount(avatarId);
+        await this.applyState(ctx, output);
+        await this.deps.onReplied?.(avatarId, conversationId);
+        return sent ? 'sent' : 'skipped';
+      } finally {
+        await this.deps.lock.release(key, token);
+      }
+    });
+  }
+
   /** 重試都失敗後，在對話裡留一則系統訊息，玩家可以按「重試」 */
   async reportFailure(conversationId: string, err: unknown): Promise<void> {
     const ctx = await this.loadContext(conversationId);
@@ -331,7 +596,19 @@ export class ReplyEngine {
       { affinity: output.affinityDelta, trust: output.trustDelta, event: output.event?.type, note: output.event?.note },
       warmUp,
     );
-    const changed = output.mood || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
+    // 群組：對其他成員的好感
+    const others: string[] = [];
+    if (Object.keys(output.othersAffinity).length) {
+      const names = await this.memberNames(ctx.conversationId);
+      for (const [name, d] of Object.entries(output.othersAffinity)) {
+        const id = [...names.entries()].find(([, n]) => n === name)?.[0];
+        if (!id || id === ctx.avatar.id) continue;
+        const r = await applyInteraction(db, ctx.avatar.id, { affinity: d }, warmUp, `avatar:${id}`);
+        others.push(`對${name}的好感 ${r.before.affinity} → ${r.after.affinity}`);
+      }
+    }
+    const changed =
+      output.mood || others.length || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
     if (changed) {
       await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
       const parts = [
@@ -340,6 +617,7 @@ export class ReplyEngine {
         before.trust !== after.trust ? `信任 ${before.trust} → ${after.trust}` : '',
         before.stage !== after.stage ? `關係 ${before.stage} → ${after.stage}` : '',
         output.event ? `事件：${output.event.type}` : '',
+        ...others,
       ].filter(Boolean);
       await logEvent({
         category: 'state',
@@ -365,6 +643,7 @@ export class ReplyEngine {
     const history = await this.loadHistory(ctx.conversationId);
     const profile = await loadProfile(db);
     const now = this.now();
+    const group = ctx.type === 'group' ? await this.groupInfo(ctx, situation, profile.preferences?.nickname) : null;
     const embedder = await embedderFromSettings(db, this.deps.box, settings, this.deps.fetchFn).catch(() => null);
     const [relationship, mood, impression] = await Promise.all([
       getRelationship(db, ctx.avatar.id),
@@ -399,23 +678,22 @@ export class ReplyEngine {
       },
       situation,
       lifeLog,
+      group,
       settings,
       history,
       now,
     });
-    // 主動傳訊息時，最後一則不是玩家說的話；補一個提示回合（Anthropic、Gemini 要求最後是 user）
+    // 最後一則不是別人說的話時（主動發話、群組裡自己剛說過），補一個提示回合（Anthropic、Gemini 要求最後是 user）
     const last = history.at(-1);
-    const chat =
+    const gap = last ? `距離上一則訊息過了 ${formatGap(now.getTime() - last.createdAt.getTime())}。` : '你們還沒聊過天。';
+    const nudge =
       situation.mode === 'proactive'
-        ? [
-            ...built,
-            {
-              role: 'user' as const,
-              content: `（系統：${last ? `距離上一則訊息過了 ${formatGap(now.getTime() - last.createdAt.getTime())}。` : '你們還沒聊過天。'}現在由你主動傳訊息給對方。）`,
-            },
-          ]
-        : built;
-    const allowEmpty = situation.mode === 'proactive';
+        ? `（系統：${gap}現在由你主動${group ? '在群組裡開個話題' : '傳訊息給對方'}。）`
+        : built.at(-1)?.role === 'assistant'
+          ? '（系統：輪到你說話。）'
+          : null;
+    const chat = nudge ? [...built, { role: 'user' as const, content: nudge }] : built;
+    const allowEmpty = situation.mode === 'proactive' || !!group;
     return {
       system,
       chat,
@@ -430,19 +708,63 @@ export class ReplyEngine {
         lifeLog: lifeLog?.length ?? 0,
         historyMessages: history.length,
         disclosure: profile.preferences ? relationship.stage : 'no-profile',
+        group: group ? { title: group.title, members: group.members.map((m) => m.name), mentioned: group.mentioned } : null,
       },
     };
   }
 
+  /** 群組的成員、與每個成員的關係 */
+  private async groupInfo(ctx: Ctx, situation: PromptSituation, nickname?: string): Promise<PromptGroup> {
+    const db = this.deps.db;
+    const [conv] = await db.select().from(conversations).where(eq(conversations.id, ctx.conversationId));
+    const rows = await db
+      .select({ avatar: avatars })
+      .from(conversationMembers)
+      .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
+      .where(eq(conversationMembers.conversationId, ctx.conversationId));
+    const members = [];
+    for (const { avatar } of rows) {
+      if (avatar.id === ctx.avatar.id) continue;
+      const r = await getRelationship(db, ctx.avatar.id, `avatar:${avatar.id}`, 'acquaintance');
+      members.push({
+        id: avatar.id,
+        name: avatar.name,
+        bio: avatar.bio,
+        relationship: { stage: r.stage, affinity: r.affinity, trust: r.trust },
+      });
+    }
+    return {
+      conversationId: ctx.conversationId,
+      title: conv?.title ?? '群組',
+      selfId: ctx.avatar.id,
+      members,
+      userName: nickname || '玩家',
+      discretion: ctx.avatar.persona.principles?.discretion ?? 60,
+      mentioned: situation.mentioned,
+      before: situation.before,
+    };
+  }
+
+  private async memberNames(conversationId: string): Promise<Map<string, string>> {
+    const rows = await this.deps.db
+      .select({ id: avatars.id, name: avatars.name })
+      .from(conversationMembers)
+      .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
+      .where(eq(conversationMembers.conversationId, conversationId));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
   /** 監控頁：如果現在回覆（或主動發話），會送出什麼 */
-  async previewPrompt(conversationId: string, mode: 'reply' | 'proactive') {
-    const ctx = await this.loadContext(conversationId);
+  async previewPrompt(conversationId: string, mode: 'reply' | 'proactive', avatarId?: string) {
+    const ctx = await this.loadContext(conversationId, avatarId);
     if (!ctx) return null;
     const now = this.now();
     const situation: PromptSituation =
       mode === 'proactive'
         ? { mode: 'proactive' }
-        : { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) };
+        : ctx.type === 'group'
+          ? { mode: 'group' }
+          : { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) };
     const { system, chat, notes } = await this.buildPrompt(ctx, situation, { preview: true });
     return { system, messages: chat, notes: { ...notes, avatar: ctx.avatar.name, llm: ctx.avatar.llm } };
   }
@@ -483,17 +805,23 @@ export class ReplyEngine {
     return { ...output, traceId: second.traceId };
   }
 
-  private async loadContext(conversationId: string): Promise<Ctx | null> {
+  /** 一對一：唯一的成員；群組：指定的成員 */
+  private async loadContext(conversationId: string, avatarId?: string): Promise<Ctx | null> {
     const [row] = await this.deps.db
-      .select({ avatar: avatars, member: conversationMembers })
+      .select({ avatar: avatars, member: conversationMembers, type: conversations.type })
       .from(conversations)
       .innerJoin(conversationMembers, eq(conversationMembers.conversationId, conversations.id))
       .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
-      // 群組的回覆在第 7 階段
-      .where(and(eq(conversations.id, conversationId), eq(conversations.type, 'dm')));
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          avatarId ? eq(conversationMembers.avatarId, avatarId) : eq(conversations.type, 'dm'),
+        ),
+      );
     return row
       ? {
           conversationId,
+          type: row.type,
           avatar: row.avatar,
           handledUpTo: row.member.handledUpTo,
           seenUpTo: row.member.seenUpTo,
@@ -526,7 +854,12 @@ export class ReplyEngine {
 
   private async loadHistory(conversationId: string): Promise<HistoryMessage[]> {
     const rows = await this.deps.db
-      .select({ senderType: messages.senderType, content: messages.content, createdAt: messages.createdAt })
+      .select({
+        senderType: messages.senderType,
+        senderAvatarId: messages.senderAvatarId,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), inArray(messages.senderType, ['user', 'avatar'])))
       .orderBy(desc(messages.createdAt), desc(messages.seq))

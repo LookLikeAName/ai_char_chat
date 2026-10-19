@@ -34,8 +34,28 @@ export interface PromptAvatar {
 
 export interface HistoryMessage {
   senderType: 'user' | 'avatar';
+  /** 群組裡用來分辨是誰說的 */
+  senderAvatarId?: string | null;
   content: string;
   createdAt: Date;
+}
+
+/** 群組聊天的資訊（一對一時省略） */
+export interface PromptGroup {
+  conversationId: string;
+  title: string;
+  /** 自己的 avatar id */
+  selfId: string;
+  /** 其他成員（不含自己） */
+  members: { id: string; name: string; bio: string; relationship?: RelationshipState }[];
+  /** 玩家在群組裡的名字 */
+  userName: string;
+  /** 自己的口風（0 大嘴巴～100 守口如瓶） */
+  discretion: number;
+  /** 這一輪：玩家點名了你 */
+  mentioned?: boolean;
+  /** 這一輪：在你之前已經回覆的成員 */
+  before?: string[];
 }
 
 /** 玩家的 profile；還沒填偏好問卷時為 null */
@@ -49,18 +69,22 @@ export interface PromptUser {
 export interface PromptState {
   relationship: RelationshipState;
   mood: Mood;
-  /** 依相關度挑出的記憶 */
-  memories: { content: string; createdAt: Date }[];
+  /** 依相關度挑出的記憶；visibility：private（私訊得知）、group:<id>、public */
+  memories: { content: string; createdAt: Date; visibility?: string }[];
   impression: string | null;
 }
 
 /** 這次回覆（或主動傳訊息）的當下情境 */
 export interface PromptSituation {
-  mode: 'reply' | 'proactive';
+  mode: 'reply' | 'proactive' | 'group';
   /** 回覆時：怎麼看到訊息的 */
   reason?: SeenReason;
   /** 回覆時：玩家第一則還沒讀的訊息，到看到為止過了多久 */
   waitedMs?: number;
+  /** 群組：這一輪玩家點名了你 */
+  mentioned?: boolean;
+  /** 群組：這一輪在你之前已經回覆的成員 */
+  before?: string[];
 }
 
 export interface ReplyPromptInput {
@@ -70,6 +94,7 @@ export interface ReplyPromptInput {
   situation?: PromptSituation;
   /** 今天的生活日誌（全部；prompt 只放已經發生的） */
   lifeLog?: LifeLogEvent[] | null;
+  group?: PromptGroup | null;
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
@@ -110,7 +135,7 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history, user, state, situation, lifeLog } = input;
+  const { avatar, settings, now, history, user, state, situation, lifeLog, group } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
@@ -129,31 +154,35 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
     ? `${persona.relationship.withUser}\n你稱呼對方「${persona.relationship.callsUser}」。`
     : '你們的關係還沒有特別設定：就當作透過朋友認識不久、正在慢慢熟悉的人。';
 
-  return `你是「${avatar.name}」，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。
+  const opening = group
+    ? `你是「${avatar.name}」，正在通訊軟體的群組「${group.title}」裡聊天。群組裡有你、對方（${group.userName}），還有${group.members.map((m) => `「${m.name}」`).join('、')}。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`
+    : `你是「${avatar.name}」，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`;
+
+  return `${opening}
 
 # 你的設定
 ${avatar.bio || '（沒有額外描述）'}
 ${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
 ${relationship}
-${state ? `\n${stateSection(state, user, now, settings.timezone)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}
+${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
 - 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
 - 不要捏造對方沒說過的事；不知道就問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
-- 除非你的設定另有指定，用繁體中文（台灣用語）。
+- 除非你的設定另有指定，用繁體中文（台灣用語）。${group ? GROUP_RULES : ''}
 - ${content}
 
 # 現在
-現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity)}
+現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity, !!group)}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
-{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3, "relationship_event": null}` : '}'}${
+{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3, "relationship_event": null${group ? ', "others_affinity": {}' : ''}}` : '}'}${
     state
       ? `
-${situation?.mode === 'proactive' ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
+${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
 - relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
       : ''
   }`;
@@ -173,14 +202,43 @@ const SITUATIONS: Record<SeenReason, (activity: string, waited: string) => strin
   woken: () => '你原本在睡覺，被對方連續的訊息吵醒了。依你的個性反應（可能迷糊、有點不爽，或擔心對方出了什麼事）。',
 };
 
-function situationSection(s: PromptSituation | undefined, activity: string | undefined): string {
-  if (!s) return '';
+function situationSection(s: PromptSituation | undefined, activity: string | undefined, inGroup = false): string {
+  if (!s || s.mode === 'group') return '';
+  if (s.mode === 'proactive' && inGroup) {
+    return `\n\n## 這次的情況\n群組裡最近沒什麼人說話，你想開個話題：分享今天發生的事、問大家意見、或丟一個有趣的東西。要自然，像真的朋友群組。`;
+  }
   if (s.mode === 'proactive') {
     return `\n\n## 這次的情況\n對方現在沒有在跟你聊天，是你想主動傳訊息給對方。可以聊今天發生的事、追問對方之前提過的事、分享你看到的東西，或只是想念對方；要自然，不要像客服或制式問候。`;
   }
   const waited = s.waitedMs && s.waitedMs > 5 * 60_000 ? formatGap(s.waitedMs) : '';
   const text = s.reason ? SITUATIONS[s.reason](activity ?? '', waited) : '';
   return text ? `\n\n## 這次的情況\n${text}` : '';
+}
+
+const GROUP_RULES = `
+- 這是群組：不需要每則訊息都回，也不用每次都對玩家說話；可以回應其他成員、接話、吐槽，或只說一句。
+- 被點名（@你或叫你的名字）就一定要回應。想叫某個人時，在訊息裡寫「@名字」。
+- 不要重複別人剛說過的話；別人已經回答了的事，就換個角度或補充。`;
+
+function groupSection(g: PromptGroup): string {
+  const lines = [`## 群組成員`];
+  for (const m of g.members) {
+    const r = m.relationship;
+    lines.push(`- ${m.name}：${m.bio || '（沒有簡介）'}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`);
+  }
+  lines.push(
+    '',
+    `標記「私下得知」的記憶，是在私訊裡聽說的（「在別的群組聽說」的也一樣不是這裡的人都知道）：${
+      g.discretion >= 50
+        ? '你口風很緊，不會在群組裡說出來，也不會暗示。'
+        : g.discretion >= 25
+          ? '原則上不在群組裡說，但你偶爾會不小心透露一點。'
+          : '你口風很鬆，可能會不小心在群組裡說溜嘴。'
+    }`,
+  );
+  if (g.mentioned) lines.push('', '這一輪對方點名了你，一定要回應。');
+  if (g.before?.length) lines.push('', `這一輪 ${g.before.join('、')} 已經先回了，看得到他們說了什麼。`);
+  return lines.join('\n');
 }
 
 const FAMILIAR: Stage[] = ['friend', 'close', 'crush', 'lover'];
@@ -212,7 +270,21 @@ function shortDate(d: Date, timezone: string): string {
   return new Intl.DateTimeFormat('zh-TW', { timeZone: timezone, month: 'numeric', day: 'numeric' }).format(d);
 }
 
-function stateSection(state: PromptState, user: PromptUser | null | undefined, now: Date, timezone: string): string {
+/** 群組裡，標出記憶是從哪裡聽來的（私訊、別的群組） */
+function memoryMark(visibility: string | undefined, group: PromptGroup | null | undefined): string {
+  if (!group || !visibility) return '';
+  if (visibility === 'private') return '（私下得知）';
+  if (visibility.startsWith('group:') && visibility !== `group:${group.conversationId}`) return '（在別的群組聽說）';
+  return '';
+}
+
+function stateSection(
+  state: PromptState,
+  user: PromptUser | null | undefined,
+  now: Date,
+  timezone: string,
+  group?: PromptGroup | null,
+): string {
   const r = state.relationship;
   const romancePref = user?.preferences.romance;
   const lines = [
@@ -230,7 +302,7 @@ function stateSection(state: PromptState, user: PromptUser | null | undefined, n
       '## 你記得的事（自然地想起來就好，不要硬塞進對話）',
       ...state.memories.map((m) => {
         const ago = now.getTime() - m.createdAt.getTime();
-        return `- ${shortDate(m.createdAt, timezone)}（${ago < 3_600_000 ? '剛剛' : `${formatGap(ago)}前`}）：${m.content}`;
+        return `- ${shortDate(m.createdAt, timezone)}（${ago < 3_600_000 ? '剛剛' : `${formatGap(ago)}前`}）${memoryMark(m.visibility, group)}：${m.content}`;
       }),
     );
   }
@@ -241,7 +313,7 @@ function stateSection(state: PromptState, user: PromptUser | null | undefined, n
  * 對話紀錄轉成 user / assistant 交替的訊息。
  * avatar 的連續訊息合成一個 assistant 回合，並寫成和輸出相同的 JSON，讓模型維持格式。
  */
-export function buildHistory(history: HistoryMessage[]): ChatMessage[] {
+export function buildHistory(history: HistoryMessage[], group?: PromptGroup | null): ChatMessage[] {
   const recent = history.slice(-HISTORY_MAX_MESSAGES);
   // 從最新往回累計字數
   let budget = HISTORY_CHAR_BUDGET;
@@ -256,8 +328,11 @@ export function buildHistory(history: HistoryMessage[]): ChatMessage[] {
   kept.forEach((m, i) => {
     const prev = kept[i - 1];
     const gap = prev ? m.createdAt.getTime() - prev.createdAt.getTime() : 0;
-    const role = m.senderType === 'user' ? 'user' : 'assistant';
-    let text = m.content;
+    // 群組：自己說的是 assistant；玩家與其他成員說的都是 user，前面標上名字
+    const mine = m.senderType === 'avatar' && (!group || m.senderAvatarId === group.selfId);
+    const role = mine ? 'assistant' : 'user';
+    const who = !group || mine ? '' : m.senderType === 'user' ? group.userName : (group.members.find((x) => x.id === m.senderAvatarId)?.name ?? '某位成員');
+    let text = who ? `${who}：${m.content}` : m.content;
     if (gap > GAP_NOTE_MS && role === 'user') text = `（${formatGap(gap)}後）${text}`;
     const last = turns.at(-1);
     if (last && last.role === role) last.parts.push(text);
@@ -271,5 +346,5 @@ export function buildHistory(history: HistoryMessage[]): ChatMessage[] {
 }
 
 export function buildReplyPrompt(input: ReplyPromptInput): { system: string; messages: ChatMessage[] } {
-  return { system: buildSystemPrompt(input), messages: buildHistory(input.history) };
+  return { system: buildSystemPrompt(input), messages: buildHistory(input.history, input.group) };
 }

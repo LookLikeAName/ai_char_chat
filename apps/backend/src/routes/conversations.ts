@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { sendMessageSchema, type ConversationDto } from '@acc/shared';
+import { groupInputSchema, sendMessageSchema, type ConversationDto } from '@acc/shared';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
-import { notFound, parseBody } from '../errors.ts';
-import { scheduleReply } from '../reply/planner.ts';
+import { HttpError, notFound, parseBody } from '../errors.ts';
+import { scheduleGroupTurn, scheduleReply } from '../reply/planner.ts';
+import { getRelationship } from '../relationship/service.ts';
 import { mediaUrl } from '../services/avatars.ts';
 import { messageToDto, postMessage } from '../services/messages.ts';
 
@@ -69,6 +70,7 @@ export async function conversationRoutes(app: FastifyInstance) {
           lastMessageAt: c.lastMessageAt?.toISOString() ?? null,
           unreadCount: unreadBy.get(c.id) ?? 0,
           seenUpTo: dmAvatar?.seenUpTo?.toISOString() ?? null,
+          members: mem.map((m) => ({ avatarId: m.avatarId, seenUpTo: m.seenUpTo?.toISOString() ?? null })),
         };
       })
       .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
@@ -90,10 +92,11 @@ export async function conversationRoutes(app: FastifyInstance) {
   app.post('/conversations/:id/messages', async (req, reply) => {
     const { id } = parseBody(idParams, req.params);
     const { content } = parseBody(sendMessageSchema, req.body);
-    await assertConversation(id);
+    const conv = await assertConversation(id);
     const dto = await postMessage(db, events, { conversationId: id, senderType: 'user', content });
-    // 依 avatar 的作息決定什麼時候看到；連續傳的訊息會合併成一次回覆
-    await scheduleReply(db, jobs, id);
+    // 一對一：依 avatar 的作息決定什麼時候看到；群組：等玩家講完再開始一輪
+    if (conv.type === 'group') await scheduleGroupTurn(db, jobs, id);
+    else await scheduleReply(db, jobs, id);
     return reply.status(201).send(dto);
   });
 
@@ -114,12 +117,89 @@ export async function conversationRoutes(app: FastifyInstance) {
       .delete(messages)
       .where(and(eq(messages.conversationId, id), eq(messages.senderType, 'system'), sql`${messages.meta}->>'systemKind' = 'error'`));
     await events.publish({ type: 'messages.changed', conversationId: id });
-    await jobs.add({ kind: 'reply', conversationId: id, force: true });
+    const conv = await assertConversation(id);
+    await jobs.add(
+      conv.type === 'group' ? { kind: 'group.turn', conversationId: id, force: true } : { kind: 'reply', conversationId: id, force: true },
+    );
     return reply.status(202).send();
   });
 
   async function assertConversation(id: string) {
-    const [c] = await db.select({ id: conversations.id }).from(conversations).where(eq(conversations.id, id));
+    const [c] = await db.select().from(conversations).where(eq(conversations.id, id));
     if (!c) throw notFound('對話');
+    return c;
   }
+
+  async function assertGroup(id: string) {
+    const c = await assertConversation(id);
+    if (c.type !== 'group') throw new HttpError(400, '這不是群組');
+    return c;
+  }
+
+  async function assertAvatars(ids: string[]) {
+    const rows = await db.select({ id: avatars.id }).from(avatars).where(inArray(avatars.id, ids));
+    if (rows.length !== new Set(ids).size) throw new HttpError(400, '有不存在的 avatar');
+  }
+
+  /** 同一個群組的 avatar 之間，第一次見面當作認識 */
+  async function ensurePairs(ids: string[]) {
+    for (const a of ids) for (const b of ids) if (a !== b) await getRelationship(db, a, `avatar:${b}`, 'acquaintance');
+  }
+
+  app.post('/conversations', async (req, reply) => {
+    const { title, avatarIds } = parseBody(groupInputSchema, req.body);
+    await assertAvatars(avatarIds);
+    const conv = await db.transaction(async (tx) => {
+      const [c] = await tx.insert(conversations).values({ type: 'group', title }).returning();
+      await tx.insert(conversationMembers).values([...new Set(avatarIds)].map((avatarId) => ({ conversationId: c!.id, avatarId })));
+      return c!;
+    });
+    await ensurePairs(avatarIds);
+    await events.publish({ type: 'conversations.changed' });
+    return reply.status(201).send({ id: conv.id });
+  });
+
+  app.put('/conversations/:id', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    const { title, avatarIds } = parseBody(groupInputSchema, req.body);
+    await assertGroup(id);
+    await assertAvatars(avatarIds);
+    const wanted = new Set(avatarIds);
+    const current = await db.select().from(conversationMembers).where(eq(conversationMembers.conversationId, id));
+    await db.transaction(async (tx) => {
+      await tx.update(conversations).set({ title, updatedAt: new Date() }).where(eq(conversations.id, id));
+      const removed = current.filter((m) => !wanted.has(m.avatarId)).map((m) => m.avatarId);
+      if (removed.length) {
+        await tx
+          .delete(conversationMembers)
+          .where(and(eq(conversationMembers.conversationId, id), inArray(conversationMembers.avatarId, removed)));
+      }
+      const added = [...wanted].filter((a) => !current.some((m) => m.avatarId === a));
+      // 新加入的成員從現在開始參與，之前的訊息不算它「沒讀」
+      if (added.length) {
+        await tx.insert(conversationMembers).values(added.map((avatarId) => ({ conversationId: id, avatarId, seenUpTo: new Date() })));
+      }
+    });
+    await ensurePairs(avatarIds);
+    await events.publish({ type: 'conversations.changed' });
+    return { ok: true };
+  });
+
+  app.delete('/conversations/:id', async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    await assertGroup(id);
+    await db.delete(conversations).where(eq(conversations.id, id));
+    await events.publish({ type: 'conversations.changed' });
+    return reply.status(204).send();
+  });
+
+  /** 群組：玩家正在打字（前端每幾秒送一次），這一輪會等玩家打完 */
+  app.post('/conversations/:id/typing', async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    await db
+      .update(conversations)
+      .set({ userTypingAt: new Date() })
+      .where(and(eq(conversations.id, id), eq(conversations.type, 'group')));
+    return reply.status(204).send();
+  });
 }
