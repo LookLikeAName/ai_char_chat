@@ -8,6 +8,7 @@ import { scheduleGroupTurn, scheduleReply } from '../reply/planner.ts';
 import { getRelationship } from '../relationship/service.ts';
 import { mediaUrl } from '../services/avatars.ts';
 import { messageToDto, postMessage } from '../services/messages.ts';
+import { readUpload } from './uploads.ts';
 
 const idParams = z.object({ id: z.uuid() });
 const pageQuery = z.object({
@@ -91,9 +92,15 @@ export async function conversationRoutes(app: FastifyInstance) {
 
   app.post('/conversations/:id/messages', async (req, reply) => {
     const { id } = parseBody(idParams, req.params);
-    const { content } = parseBody(sendMessageSchema, req.body);
+    const { content, image } = parseBody(sendMessageSchema, req.body);
     const conv = await assertConversation(id);
-    const dto = await postMessage(db, events, { conversationId: id, senderType: 'user', content });
+    const upload = image ? await readUpload(app.deps.mediaDir, image) : null;
+    const dto = await postMessage(db, events, {
+      conversationId: id,
+      senderType: 'user',
+      content,
+      meta: upload ? { image: { path: upload.path, mime: upload.mime, width: upload.width, height: upload.height } } : undefined,
+    });
     // 一對一：依 avatar 的作息決定什麼時候看到；群組：等玩家講完再開始一輪
     if (conv.type === 'group') await scheduleGroupTurn(db, jobs, id);
     else await scheduleReply(db, jobs, id);

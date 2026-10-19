@@ -1,7 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { PROVIDER_LABELS, resolveParams, STATUS_LABELS, type AvatarDto, type ConversationDto, type MessageDto } from '@acc/shared';
+import {
+  messagePreview,
+  PROVIDER_LABELS,
+  resolveParams,
+  STATUS_LABELS,
+  type AvatarDto,
+  type ConversationDto,
+  type MessageDto,
+  type MessageImageDto,
+} from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { AvatarStatePanel } from '../../components/AvatarStatePanel.tsx';
 import { GroupDialog } from '../../components/GroupDialog.tsx';
@@ -9,6 +18,7 @@ import { Icon } from '../../components/Icon.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { clockTime, dayLabel, sameDay, shortTime } from '../../lib/format.ts';
 import { useTyping } from '../../lib/serverEvents.tsx';
+import { prepareImage } from '../../lib/images.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
 
 export function ChatsPage() {
@@ -201,7 +211,7 @@ function ChatItem({
       : c.type === 'group' && last?.senderAvatarId
         ? avatars.find((a) => a.id === last.senderAvatarId)?.name
         : undefined;
-  const preview = last ? `${senderName ? `${senderName}：` : ''}${last.content}` : '還沒有訊息';
+  const preview = last ? `${senderName ? `${senderName}：` : ''}${messagePreview(last)}` : '還沒有訊息';
   const typingText = c.type === 'group' ? `${typingNames(typingIds, avatars)} 輸入中…` : '輸入中…';
   return (
     <Link to={`/chats/${c.id}`} className={`chat-item${active ? ' active' : ''}`}>
@@ -255,6 +265,10 @@ function ChatView({
   const typingIds = useTyping(conversation.id);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isGroup = conversation.type === 'group';
+  // 把圖片拖進聊天畫面就附加到輸入框
+  const [dropped, setDropped] = useState<{ file: File; n: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [viewer, setViewer] = useState<MessageImageDto | null>(null);
   const dmAvatar = !isGroup ? byId.get(conversation.memberAvatarIds[0] ?? '') : undefined;
 
   useLayoutEffect(() => {
@@ -278,7 +292,23 @@ function ChatView({
   const retryId = lastNonUser?.systemKind === 'error' ? lastNonUser.id : null;
 
   return (
-    <main className="chat-view">
+    <main
+      className={`chat-view${dragging ? ' dragging' : ''}`}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.items].some((i) => i.kind === 'file')) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        const file = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+        if (file) setDropped((d) => ({ file, n: (d?.n ?? 0) + 1 }));
+      }}
+    >
       <header className="chat-head">
         <button className="icon-btn only-narrow" onClick={() => navigate('/chats')} aria-label="返回聊天列表">
           <Icon name="back" />
@@ -328,13 +358,15 @@ function ChatView({
           showThoughts={!!settings?.showInnerThoughts}
           retryId={retryId}
           onRetry={() => void api.retryReply(conversation.id)}
+          onOpenImage={setViewer}
         />
         {typingIds.map((id) => (
           <TypingBubble key={id} avatar={byId.get(id)} />
         ))}
       </div>
 
-      <Composer conversationId={conversation.id} isGroup={isGroup} mention={mention} />
+      <Composer conversationId={conversation.id} isGroup={isGroup} mention={mention} dropped={dropped} />
+      {viewer && <ImageViewer image={viewer} onClose={() => setViewer(null)} />}
     </main>
   );
 }
@@ -363,6 +395,7 @@ function MessageList({
   showThoughts,
   retryId,
   onRetry,
+  onOpenImage,
 }: {
   messages: MessageDto[];
   byId: Map<string, AvatarDto>;
@@ -372,6 +405,7 @@ function MessageList({
   showThoughts: boolean;
   retryId: string | null;
   onRetry: () => void;
+  onOpenImage: (image: MessageImageDto) => void;
 }) {
   const seenAt = seenUpTo ? Date.parse(seenUpTo) : 0;
   const memberSeen = members.map((m) => (m.seenUpTo ? Date.parse(m.seenUpTo) : 0));
@@ -428,7 +462,10 @@ function MessageList({
                     </div>
                   )}
                   <div className="msg-line">
-                    <div className="msg-bubble">{m.content}</div>
+                    <div className={`msg-stack${m.image ? ' has-image' : ''}`}>
+                      {m.image && <MessageImage image={m.image} onOpen={() => onOpenImage(m.image!)} />}
+                      {m.content && <div className="msg-bubble">{m.content}</div>}
+                    </div>
                     <span className="msg-meta">
                       {seen && <span className="msg-seen">{seen}</span>}
                       <time className="msg-time" dateTime={m.createdAt}>
@@ -453,25 +490,50 @@ function Composer({
   conversationId,
   isGroup,
   mention,
+  dropped,
 }: {
   conversationId: string;
   isGroup: boolean;
   mention: { name: string; n: number } | null;
+  dropped: { file: File; n: number } | null;
 }) {
   const [text, setText] = useState('');
+  const [attachment, setAttachment] = useState<{ file: File; preview: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const lastPing = useRef(0);
   const ref = useRef<HTMLTextAreaElement>(null);
   const toast = useToast();
   const qc = useQueryClient();
+  const attach = (file: File) => {
+    if (!file.type.startsWith('image/')) return toast('只能傳圖片', 'error');
+    setAttachment({ file, preview: URL.createObjectURL(file) });
+    ref.current?.focus();
+  };
+  const droppedN = dropped?.n;
+  useEffect(() => {
+    if (dropped) attach(dropped.file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droppedN]);
+  useEffect(
+    () => () => {
+      if (attachment) URL.revokeObjectURL(attachment.preview);
+    },
+    [attachment],
+  );
+
   const send = useMutation({
-    mutationFn: (content: string) => api.sendMessage(conversationId, content),
+    mutationFn: async ({ content, file }: { content: string; file: File | null }) => {
+      const image = file ? (await api.upload(await prepareImage(file))).id : undefined;
+      return api.sendMessage(conversationId, content, image);
+    },
     onSuccess: (msg) => {
       qc.setQueryData<{ messages: MessageDto[]; hasMore: boolean }>(qk.messages(conversationId), (page) =>
         page && !page.messages.some((m) => m.id === msg.id) ? { ...page, messages: [...page.messages, msg] } : page,
       );
     },
-    onError: (err, content) => {
+    onError: (err, { content, file }) => {
       setText(content);
+      if (file) attach(file);
       toast(`送出失敗：${errorText(err)}`, 'error');
     },
   });
@@ -496,9 +558,11 @@ function Composer({
 
   const submit = () => {
     const content = text.trim();
-    if (!content) return;
+    const file = attachment?.file ?? null;
+    if ((!content && !file) || send.isPending) return;
     setText('');
-    send.mutate(content);
+    setAttachment(null);
+    send.mutate({ content, file });
   };
 
   return (
@@ -509,6 +573,34 @@ function Composer({
         submit();
       }}
     >
+      {attachment && (
+        <div className="composer-attachment">
+          <img src={attachment.preview} alt="要傳的圖片" />
+          <button type="button" className="icon-btn icon-btn-small" onClick={() => setAttachment(null)} aria-label="不傳這張圖片">
+            ×
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={() => fileRef.current?.click()}
+        aria-label="傳圖片"
+        title="傳圖片（也可以貼上或拖進來）"
+      >
+        <Icon name="image" />
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) attach(f);
+          e.target.value = '';
+        }}
+      />
       <textarea
         ref={ref}
         rows={1}
@@ -523,6 +615,13 @@ function Composer({
             void api.typing(conversationId).catch(() => {});
           }
         }}
+        onPaste={(e) => {
+          const file = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+          if (file) {
+            e.preventDefault();
+            attach(file);
+          }
+        }}
         onKeyDown={(e) => {
           // 注音、倉頡等輸入法選字時的 Enter 不能送出
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -532,7 +631,7 @@ function Composer({
         }}
         aria-label="訊息"
       />
-      <button type="submit" className="send-btn" disabled={!text.trim()} aria-label="送出">
+      <button type="submit" className="send-btn" disabled={(!text.trim() && !attachment) || send.isPending} aria-label="送出">
         <Icon name="send" />
       </button>
     </form>
@@ -679,5 +778,38 @@ function GroupInfo({
       </button>
       {editing && <GroupDialog group={conversation} onClose={() => setEditing(false)} />}
     </div>
+  );
+}
+
+/** 訊息裡的圖片：先依尺寸留好位置，載入時畫面才不會跳 */
+function MessageImage({ image, onOpen }: { image: MessageImageDto; onOpen: () => void }) {
+  const ratio = image.width && image.height ? image.width / image.height : null;
+  return (
+    <button
+      type="button"
+      className="msg-image"
+      onClick={onOpen}
+      style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      title={image.description ?? '查看大圖'}
+      aria-label={image.description ? `照片：${image.description}` : '查看大圖'}
+    >
+      <img src={image.url} alt={image.description ?? ''} loading="lazy" />
+    </button>
+  );
+}
+
+function ImageViewer({ image, onClose }: { image: MessageImageDto; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return (
+    <dialog ref={ref} className="image-viewer" onClose={onClose} onClick={onClose} aria-label="圖片">
+      <img src={image.url} alt={image.description ?? ''} />
+      {image.description && <p>{image.description}</p>}
+      <a className="btn btn-small" href={image.url} download onClick={(e) => e.stopPropagation()}>
+        下載
+      </a>
+    </dialog>
   );
 }

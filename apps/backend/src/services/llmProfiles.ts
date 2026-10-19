@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import {
+  defaultVision,
   effectiveBaseUrl,
   resolveParams,
   type LlmBinding,
@@ -26,6 +27,8 @@ export function profileToDto(row: ProfileRow, usedBy: number): LlmProfileDto {
     apiKeyHint: row.apiKeyHint,
     defaults: row.defaults,
     pricing: row.pricing ?? null,
+    vision: row.vision ?? defaultVision(row.provider),
+    visionSet: row.vision !== null,
     usedBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

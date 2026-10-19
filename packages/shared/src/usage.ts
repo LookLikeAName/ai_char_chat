@@ -33,6 +33,8 @@ export const USAGE_PURPOSE_LABELS: Record<string, string> = {
   'memory.extract': '記憶萃取',
   'memory.reflect': '整理印象',
   'life.log': '生活日誌',
+  'image.caption': '描述圖片',
+  'photo.generate': '拍照片',
 };
 
 export function totalTokens(t: Pick<UsageTotals, 'inputTokens' | 'outputTokens'>): number {

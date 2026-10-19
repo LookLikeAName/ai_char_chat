@@ -1,4 +1,5 @@
 // Gemini API（generateContent）：https://ai.google.dev/api/generate-content
+import { partsOf } from '../content.ts';
 import { alternate, requestJson, requestSignal, trimSlash } from '../http.ts';
 import { LlmError, type ProviderAdapter } from '../types.ts';
 
@@ -25,7 +26,9 @@ export const googleAdapter: ProviderAdapter = {
     const body = {
       contents: alternate(req.messages).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
+        parts: partsOf(m.content).map((part) =>
+          part.type === 'text' ? { text: part.text } : { inlineData: { mimeType: part.mime, data: part.data } },
+        ),
       })),
       systemInstruction: req.system ? { parts: [{ text: req.system }] } : undefined,
       generationConfig: {

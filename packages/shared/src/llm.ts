@@ -66,6 +66,19 @@ export const PARAM_SPECS: readonly ParamSpec[] = [
   },
 ];
 
+/** 訊息內容可以是純文字，或文字與圖片混合（圖片是 base64） */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: string; data: string };
+export type MessageContent = string | ContentPart[];
+
+/** 監控頁顯示的版本：圖片只留類型與大小，不存整張圖 */
+export type LoggedPart = { type: 'text'; text: string } | { type: 'image'; mime: string; bytes: number };
+export type LoggedContent = string | LoggedPart[];
+
+/** 沒有特別設定時，哪些供應商當作看得懂圖片（OpenAI 相容端點不一定，例如很多本機模型不行） */
+export function defaultVision(provider: ProviderType): boolean {
+  return provider !== 'openai-compatible';
+}
+
 /** 價格（美元／每 100 萬 tokens），用來估算費用；不填就不算 */
 export const llmPricingSchema = z.object({
   input: z.number().min(0).max(10000),
@@ -88,6 +101,8 @@ export const llmProfileInputSchema = z
     apiKey: z.string().trim().min(1).nullable().optional(),
     defaults: llmParamsSchema.default({}),
     pricing: llmPricingSchema.nullable().default(null),
+    /** 看得懂圖片；null 表示依供應商預設 */
+    vision: z.boolean().nullable().default(null),
   })
   .refine((p) => p.provider !== 'openai-compatible' || !!p.baseUrl, {
     message: 'OpenAI 相容端點必須填寫 Base URL',
@@ -107,6 +122,10 @@ export interface LlmProfileDto {
   apiKeyHint: string | null;
   defaults: LlmParams;
   pricing: LlmPricing | null;
+  /** 實際是否當作看得懂圖片 */
+  vision: boolean;
+  /** 使用者有沒有手動設定（沒有的話依供應商預設） */
+  visionSet: boolean;
   /** 綁定這個設定檔的 avatar 數量 */
   usedBy: number;
   createdAt: string;

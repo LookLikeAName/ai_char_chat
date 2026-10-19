@@ -1,9 +1,9 @@
 // 記憶萃取：對話告一段落（最後一則訊息後 10 分鐘，或累積 30 則）時，
 // 請系統工具模型以 avatar 的角度挑出值得記住的事。重複觸發是安全的（以 memory_up_to 記錄處理到哪）。
-import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
-import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
+import { avatars, conversationMembers, conversations, messages, type MessageImage } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
 import { callUtility, parseJsonObject } from '../persona/utility.ts';
 import { logEvent } from '../observability.ts';
@@ -43,6 +43,7 @@ export async function extractMemories(
       senderAvatarId: messages.senderAvatarId,
       content: messages.content,
       createdAt: messages.createdAt,
+      image: sql<MessageImage | null>`${messages.meta}->'image'`,
     })
     .from(messages)
     .where(
@@ -70,7 +71,8 @@ export async function extractMemories(
   const transcript = rows
     .map((m) => {
       const who = m.senderType === 'user' ? '對方' : m.senderAvatarId === avatar.id ? '我' : (names.get(m.senderAvatarId ?? '') ?? '其他人');
-      return `[${formatNow(m.createdAt, settings.timezone)}] ${who}：${m.content}`;
+      const img = m.image ? `［${m.senderType === 'avatar' ? '照片' : '圖片'}：${m.image.description ?? m.image.caption ?? '看不到內容'}］` : '';
+      return `[${formatNow(m.createdAt, settings.timezone)}] ${who}：${[img, m.content].filter(Boolean).join(' ')}`;
     })
     .join('\n');
   const impression = await latestImpression(db, avatar.id);

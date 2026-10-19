@@ -21,8 +21,10 @@ import { llmProfileRoutes } from './routes/llmProfiles.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { transferRoutes } from './routes/transfer.ts';
+import { uploadRoutes } from './routes/uploads.ts';
 import { usageRoutes } from './routes/usage.ts';
 import { AuthService } from './services/auth.ts';
+import { CHAT_MEDIA_DIRS } from './services/media.ts';
 import { QuotaError } from './services/usage.ts';
 import { WsHub } from './ws.ts';
 
@@ -69,6 +71,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   mkdirSync(path.join(deps.mediaDir, 'avatars'), { recursive: true });
+  for (const dir of CHAT_MEDIA_DIRS) mkdirSync(path.join(deps.mediaDir, dir), { recursive: true });
   await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
   await app.register(fastifyStatic, { root: path.resolve(deps.mediaDir), prefix: '/media/', decorateReply: false });
   await app.register(websocket);
@@ -88,6 +91,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(debugRoutes);
       await api.register(usageRoutes);
       await api.register(transferRoutes);
+      await api.register(uploadRoutes);
     },
     { prefix: '/api' },
   );

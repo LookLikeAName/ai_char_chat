@@ -11,6 +11,7 @@ import {
   STAGE_LABELS,
   type AppSettings,
   type AssessmentResults,
+  type ContentPart,
   type LifeLogEvent,
   type Mood,
   type Persona,
@@ -38,7 +39,15 @@ export interface HistoryMessage {
   senderAvatarId?: string | null;
   content: string;
   createdAt: Date;
+  /** 圖片訊息：caption 是圖片內容的文字描述，description 是 avatar 傳的照片想拍的內容 */
+  image?: { caption?: string | null; description?: string | null } | null;
 }
+
+/** 實際附上圖片的訊息（看得懂圖片的模型、最近幾張）；其他圖片用文字描述 */
+export type HistoryImages = Map<HistoryMessage, { mime: string; data: string }>;
+
+/** 一張圖片在字數預算裡算多少 */
+const IMAGE_CHARS = 300;
 
 /** 群組聊天的資訊（一對一時省略） */
 export interface PromptGroup {
@@ -98,6 +107,7 @@ export interface ReplyPromptInput {
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
+  images?: HistoryImages;
   now: Date;
 }
 
@@ -313,18 +323,20 @@ function stateSection(
  * 對話紀錄轉成 user / assistant 交替的訊息。
  * avatar 的連續訊息合成一個 assistant 回合，並寫成和輸出相同的 JSON，讓模型維持格式。
  */
-export function buildHistory(history: HistoryMessage[], group?: PromptGroup | null): ChatMessage[] {
+export function buildHistory(history: HistoryMessage[], group?: PromptGroup | null, images: HistoryImages = new Map()): ChatMessage[] {
   const recent = history.slice(-HISTORY_MAX_MESSAGES);
+  const size = (m: HistoryMessage) => m.content.length + (m.image ? IMAGE_CHARS : 0);
   // 從最新往回累計字數
   let budget = HISTORY_CHAR_BUDGET;
   let start = recent.length;
-  while (start > 0 && budget - recent[start - 1]!.content.length >= 0) {
-    budget -= recent[start - 1]!.content.length;
+  while (start > 0 && budget - size(recent[start - 1]!) >= 0) {
+    budget -= size(recent[start - 1]!);
     start--;
   }
   const kept = recent.slice(start);
 
-  const turns: { role: 'user' | 'assistant'; parts: string[] }[] = [];
+  type Part = string | { mime: string; data: string };
+  const turns: { role: 'user' | 'assistant'; parts: Part[]; photos: string[] }[] = [];
   kept.forEach((m, i) => {
     const prev = kept[i - 1];
     const gap = prev ? m.createdAt.getTime() - prev.createdAt.getTime() : 0;
@@ -332,19 +344,50 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
     const mine = m.senderType === 'avatar' && (!group || m.senderAvatarId === group.selfId);
     const role = mine ? 'assistant' : 'user';
     const who = !group || mine ? '' : m.senderType === 'user' ? group.userName : (group.members.find((x) => x.id === m.senderAvatarId)?.name ?? '某位成員');
-    let text = who ? `${who}：${m.content}` : m.content;
-    if (gap > GAP_NOTE_MS && role === 'user') text = `（${formatGap(gap)}後）${text}`;
-    const last = turns.at(-1);
-    if (last && last.role === role) last.parts.push(text);
-    else turns.push({ role, parts: [text] });
+    let last = turns.at(-1);
+    if (!last || last.role !== role) turns.push((last = { role, parts: [], photos: [] }));
+
+    if (mine) {
+      // 自己傳過的照片用輸出格式的 photo 欄位表示，模型才知道要怎麼傳
+      if (m.image) last.photos.push(m.image.description ?? m.image.caption ?? '一張照片');
+      if (m.content) last.parts.push(m.content);
+      return;
+    }
+    const pixels = images.get(m);
+    const imageNote = !m.image
+      ? ''
+      : m.senderType === 'avatar'
+        ? `［傳了一張照片：${m.image.description ?? m.image.caption ?? '看不到內容'}］`
+        : pixels
+          ? '［傳了一張圖片，見下圖］'
+          : m.image.caption
+            ? `［傳了一張圖片：${m.image.caption}］`
+            : '［傳了一張圖片，但你看不到內容］';
+    let text = [imageNote, m.content].filter(Boolean).join(' ');
+    if (who) text = `${who}：${text}`;
+    if (gap > GAP_NOTE_MS) text = `（${formatGap(gap)}後）${text}`;
+    last.parts.push(text);
+    if (pixels) last.parts.push(pixels);
   });
 
-  return turns.map((t) => ({
-    role: t.role,
-    content: t.role === 'user' ? t.parts.join('\n') : JSON.stringify({ messages: t.parts }),
-  }));
+  return turns.map((t): ChatMessage => {
+    if (t.role === 'assistant') {
+      const texts = t.parts.filter((p): p is string => typeof p === 'string');
+      return { role: 'assistant', content: JSON.stringify(t.photos.length ? { messages: texts, photo: t.photos.at(-1) } : { messages: texts }) };
+    }
+    if (t.parts.every((p) => typeof p === 'string')) return { role: 'user', content: t.parts.join('\n') };
+    // 有圖片：連續的文字併成一段，圖片放在提到它的那一行後面
+    const content: ContentPart[] = [];
+    for (const p of t.parts) {
+      const prevPart = content.at(-1);
+      if (typeof p !== 'string') content.push({ type: 'image', mime: p.mime, data: p.data });
+      else if (prevPart?.type === 'text') prevPart.text += `\n${p}`;
+      else content.push({ type: 'text', text: p });
+    }
+    return { role: 'user', content };
+  });
 }
 
 export function buildReplyPrompt(input: ReplyPromptInput): { system: string; messages: ChatMessage[] } {
-  return { system: buildSystemPrompt(input), messages: buildHistory(input.history, input.group) };
+  return { system: buildSystemPrompt(input), messages: buildHistory(input.history, input.group, input.images) };
 }

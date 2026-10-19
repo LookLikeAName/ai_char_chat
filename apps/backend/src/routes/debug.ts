@@ -47,6 +47,7 @@ export async function debugRoutes(app: FastifyInstance) {
     // 預覽不需要鎖
     lock: { acquire: async () => 'preview', release: async () => {} },
     fetchFn: app.deps.fetchFn,
+    mediaDir: app.deps.mediaDir,
   });
 
   app.get('/debug/events', async (req) => {

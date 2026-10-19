@@ -1,10 +1,20 @@
 // OpenAI Chat Completions，也涵蓋所有 OpenAI 相容端點（OpenRouter、DeepSeek、Ollama、LM Studio、vLLM…）
 import { requestJson, requestSignal, trimSlash } from '../http.ts';
-import type { ProviderAdapter, ResolvedLlm } from '../types.ts';
+import type { ChatMessage, ProviderAdapter, ResolvedLlm } from '../types.ts';
 
 interface CompletionResponse {
   choices?: { message?: { content?: string | null }; finish_reason?: string }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+function toOpenAi(m: ChatMessage) {
+  if (typeof m.content === 'string') return m;
+  return {
+    role: m.role,
+    content: m.content.map((p) =>
+      p.type === 'text' ? { type: 'text', text: p.text } : { type: 'image_url', image_url: { url: `data:${p.mime};base64,${p.data}` } },
+    ),
+  };
 }
 
 function headers(llm: ResolvedLlm): Record<string, string> {
@@ -17,7 +27,7 @@ export const openaiAdapter: ProviderAdapter = {
     const official = llm.provider === 'openai';
     const body = {
       model: llm.model,
-      messages: [...(req.system ? [{ role: 'system', content: req.system }] : []), ...req.messages],
+      messages: [...(req.system ? [{ role: 'system', content: req.system }] : []), ...req.messages.map(toOpenAi)],
       temperature: p.temperature,
       top_p: p.topP,
       presence_penalty: p.presencePenalty,

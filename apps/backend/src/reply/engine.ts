@@ -23,6 +23,7 @@ import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
 import { avatars, avatarState, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
+import { loggedContent } from '../llm/content.ts';
 import type { FetchFn } from '../llm/index.ts';
 import { getLifeLog } from '../life/lifeLog.ts';
 import type { AgentJob } from '../jobs.ts';
@@ -38,6 +39,7 @@ import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
 import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptGroup, type PromptSituation } from './prompt.ts';
+import { prepareImages, profileVision, type LoadedHistory } from './images.ts';
 import { ACTIVE_WINDOW_MS } from './planner.ts';
 import { betweenMessagesMs, readPauseMs, typingMs, type Random } from './timing.ts';
 
@@ -54,6 +56,8 @@ export interface ReplyEngineDeps {
   sleep?: (ms: number) => Promise<void>;
   random?: Random;
   now?: () => Date;
+  /** 聊天圖片與 avatar 照片的檔案位置；沒給時不處理圖片 */
+  mediaDir?: string;
 }
 
 type Outcome = { kind: 'restart' } | { kind: 'sent' | 'interrupted'; output: ReplyOutput };
@@ -692,6 +696,8 @@ export class ReplyEngine {
       data: { query, memories: memories.map((m) => ({ content: m.content, score: Math.round(m.score * 1000) / 1000 })) },
     });
     const lifeLog = await getLifeLog(db, ctx.avatar.id, localClock(now, settings.timezone).date);
+    const canSee = await profileVision(db, ctx.avatar.llm?.profileId);
+    const images = await prepareImages(this.deps, settings, history, { selfId: ctx.avatar.id, canSee, preview: opts.preview });
     const { system, messages: built } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       user: profile.preferences
@@ -708,6 +714,7 @@ export class ReplyEngine {
       group,
       settings,
       history,
+      images,
       now,
     });
     // 最後一則不是別人說的話時（主動發話、群組裡自己剛說過），補一個提示回合（Anthropic、Gemini 要求最後是 user）
@@ -734,6 +741,7 @@ export class ReplyEngine {
         embedder: embedder?.model ?? null,
         lifeLog: lifeLog?.length ?? 0,
         historyMessages: history.length,
+        images: { canSee, attached: images.size },
         disclosure: profile.preferences ? relationship.stage : 'no-profile',
         group: group ? { title: group.title, members: group.members.map((m) => m.name), mentioned: group.mentioned } : null,
       },
@@ -793,7 +801,11 @@ export class ReplyEngine {
           ? { mode: 'group' }
           : { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) };
     const { system, chat, notes } = await this.buildPrompt(ctx, situation, { preview: true });
-    return { system, messages: chat, notes: { ...notes, avatar: ctx.avatar.name, llm: ctx.avatar.llm } };
+    return {
+      system,
+      messages: chat.map((m) => ({ role: m.role, content: loggedContent(m.content) })),
+      notes: { ...notes, avatar: ctx.avatar.name, llm: ctx.avatar.llm },
+    };
   }
 
   private async generate(ctx: Ctx, situation: PromptSituation): Promise<ReplyOutput> {
@@ -879,19 +891,25 @@ export class ReplyEngine {
     return !!row;
   }
 
-  private async loadHistory(conversationId: string): Promise<HistoryMessage[]> {
+  private async loadHistory(conversationId: string): Promise<LoadedHistory> {
     const rows = await this.deps.db
       .select({
+        id: messages.id,
         senderType: messages.senderType,
         senderAvatarId: messages.senderAvatarId,
         content: messages.content,
         createdAt: messages.createdAt,
+        meta: messages.meta,
       })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), inArray(messages.senderType, ['user', 'avatar'])))
       .orderBy(desc(messages.createdAt), desc(messages.seq))
       .limit(HISTORY_LOAD);
-    return rows.reverse() as HistoryMessage[];
+    return rows.reverse().map(({ meta, ...m }) => ({
+      ...(m as HistoryMessage & { id: string }),
+      image: meta.image ? { caption: meta.image.caption ?? null, description: meta.image.description ?? null } : null,
+      imageFile: meta.image,
+    }));
   }
 
   private async markSeen(ctx: Ctx, snapshot: Date): Promise<void> {

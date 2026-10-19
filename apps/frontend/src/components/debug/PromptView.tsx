@@ -1,10 +1,29 @@
 // 顯示送給 LLM 的 context：system prompt 依「#」標題分段（可收合），對話訊息依角色排列。
 import { useState } from 'react';
+import type { LoggedContent } from '@acc/shared';
 import { CopyButton } from './JsonView.tsx';
 
 interface Props {
   system?: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: LoggedContent }[];
+}
+
+/** 圖片只記了類型與大小，顯示成一個標記 */
+function Content({ content }: { content: LoggedContent }) {
+  if (typeof content === 'string') return <pre>{content}</pre>;
+  return (
+    <>
+      {content.map((p, i) =>
+        p.type === 'text' ? (
+          <pre key={i}>{p.text}</pre>
+        ) : (
+          <span key={i} className="pm-image">
+            🖼 圖片（{p.mime}，{Math.round(p.bytes / 1024)} KB）
+          </span>
+        ),
+      )}
+    </>
+  );
 }
 
 function splitSections(system: string): { title: string; body: string }[] {
@@ -49,7 +68,7 @@ export function PromptView({ system, messages }: Props) {
         {messages.map((m, i) => (
           <li key={i} className={`pm pm-${m.role}`}>
             <span className="pm-role">{m.role}</span>
-            <pre>{m.content}</pre>
+            <Content content={m.content} />
           </li>
         ))}
       </ol>

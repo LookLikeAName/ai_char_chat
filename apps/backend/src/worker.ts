@@ -17,6 +17,7 @@ import { setupObservability } from './observabilitySetup.ts';
 import { backfillEmbeddings } from './memory/store.ts';
 import { ReplyEngine } from './reply/engine.ts';
 import { loadSettings } from './services/settings.ts';
+import { pruneChatMedia } from './services/media.ts';
 import { QuotaError } from './services/usage.ts';
 
 const HEARTBEAT_MS = 10_000;
@@ -39,6 +40,7 @@ const engine = new ReplyEngine({
   box,
   events,
   lock,
+  mediaDir: config.mediaDir,
   enqueue: async (job, delay) => {
     await queue.add(job.kind, job, { ...REPLY_JOB_OPTIONS, ...KEEP, delay });
   },
@@ -73,6 +75,11 @@ async function handleExtract(avatarId: string, conversationId: string, force = f
 async function maintenance() {
   const settings = await loadSettings(db);
   await pruneObservability(db, settings.debug.retentionDays);
+  const removed = await pruneChatMedia(db, config.mediaDir).catch((err) => {
+    console.error('[worker] 整理聊天圖片失敗：', (err as Error).message);
+    return 0;
+  });
+  if (removed) console.log(`[worker] 刪除 ${removed} 個沒有用到的聊天圖片`);
   if (!settings.utilityLlm) return;
   const embedder = await embedderFromSettings(db, box, settings).catch(() => null);
   for (const a of await db.select({ id: avatars.id }).from(avatars)) {

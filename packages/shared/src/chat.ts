@@ -18,6 +18,24 @@ export interface MessageDto {
   traceId: string | null;
   /** avatar 主動傳的 */
   proactive: boolean;
+  /** 圖片訊息（玩家傳的圖、avatar 傳的照片） */
+  image: MessageImageDto | null;
+}
+
+export interface MessageImageDto {
+  url: string;
+  width: number | null;
+  height: number | null;
+  /** avatar 傳的照片：照片的內容（生成用的描述） */
+  description: string | null;
+}
+
+/** 上傳後拿到的 id，送出訊息時帶上 */
+export interface UploadDto {
+  id: string;
+  url: string;
+  width: number | null;
+  height: number | null;
 }
 
 export interface ConversationDto {
@@ -37,9 +55,22 @@ export interface ConversationDto {
   members: { avatarId: string; seenUpTo: string | null }[];
 }
 
-export const sendMessageSchema = z.object({
-  content: z.string().trim().min(1).max(4000),
-});
+export const UPLOAD_ID_PATTERN = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
+
+export const sendMessageSchema = z
+  .object({
+    content: z.string().trim().max(4000).default(''),
+    /** 先上傳（POST /uploads）拿到的 id */
+    image: z.string().regex(UPLOAD_ID_PATTERN).optional(),
+  })
+  .refine((m) => m.content || m.image, { message: '訊息是空的' });
+
+/** 聊天列表與通知用的一行文字 */
+export function messagePreview(m: Pick<MessageDto, 'content' | 'image' | 'senderType'>): string {
+  if (!m.image) return m.content;
+  const tag = m.senderType === 'avatar' ? '［照片］' : '［圖片］';
+  return m.content ? `${tag} ${m.content}` : tag;
+}
 
 export const groupInputSchema = z.object({
   title: z.string().trim().min(1).max(40),

@@ -54,6 +54,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         apiKeyHint: input.apiKey ? keyHint(input.apiKey) : null,
         defaults: input.defaults,
         pricing: input.pricing,
+        vision: input.vision,
       })
       .returning();
     await events.publish({ type: 'llmProfiles.changed' });
@@ -79,6 +80,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         model: input.model,
         defaults: input.defaults,
         pricing: input.pricing,
+        vision: input.vision,
         ...keyFields,
         updatedAt: new Date(),
       })

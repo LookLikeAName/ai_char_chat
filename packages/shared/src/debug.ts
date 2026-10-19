@@ -1,4 +1,5 @@
 // 除錯與監控：事件 log 與 LLM 呼叫紀錄（含完整 context）的資料格式。
+import type { LoggedContent } from './llm.ts';
 
 export const EVENT_CATEGORIES = ['reply', 'state', 'memory', 'proactive', 'life', 'group', 'llm', 'usage', 'job', 'system'] as const;
 export type EventCategory = (typeof EVENT_CATEGORIES)[number];
@@ -50,7 +51,7 @@ export interface TraceSummaryDto {
 
 export interface TraceDto extends TraceSummaryDto {
   params: Record<string, unknown>;
-  request: { system?: string; messages: { role: string; content: string }[]; json?: boolean };
+  request: { system?: string; messages: { role: string; content: LoggedContent }[]; json?: boolean };
   response: string | null;
   /** 呼叫端解析後的結果（例如回覆的 JSON） */
   parsed: unknown;
@@ -87,7 +88,7 @@ export interface UsageRowDto {
 
 export interface PromptPreviewDto {
   system: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: LoggedContent }[];
   /** 預覽時的條件（情境、關係、取回的記憶數…） */
   notes: Record<string, unknown>;
 }

@@ -42,6 +42,19 @@ export interface MessageMeta {
   proactive?: boolean;
   /** 產生這則訊息的 LLM 呼叫 */
   traceId?: string;
+  /** 圖片訊息：檔案在 media 下的路徑 */
+  image?: MessageImage;
+}
+
+export interface MessageImage {
+  path: string;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  /** 圖片內容的文字描述：看不懂圖片的模型、記憶整理、比較舊的紀錄都用這個 */
+  caption?: string;
+  /** avatar 傳的照片：它想拍的內容（生成用的描述） */
+  description?: string;
 }
 
 const timestamps = {
@@ -74,6 +87,8 @@ export const llmProfiles = pgTable('llm_profiles', {
   apiKeyHint: text('api_key_hint'),
   defaults: jsonb('defaults').$type<LlmParams>().notNull().default({}),
   pricing: jsonb('pricing').$type<LlmPricing | null>(),
+  /** 看得懂圖片；null 依供應商預設 */
+  vision: boolean('vision'),
   ...timestamps,
 });
 

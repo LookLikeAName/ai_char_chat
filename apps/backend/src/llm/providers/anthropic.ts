@@ -1,5 +1,6 @@
 // Anthropic Messages API：https://docs.anthropic.com/en/api/messages
 import { alternate, requestJson, requestSignal, trimSlash } from '../http.ts';
+import type { ChatMessage } from '../types.ts';
 import type { ProviderAdapter, ResolvedLlm } from '../types.ts';
 
 interface MessagesResponse {
@@ -9,6 +10,18 @@ interface MessagesResponse {
 }
 
 const DEFAULT_MAX_TOKENS = 1024;
+
+function toAnthropic(m: ChatMessage) {
+  if (typeof m.content === 'string') return m;
+  return {
+    role: m.role,
+    content: m.content.map((p) =>
+      p.type === 'text'
+        ? { type: 'text', text: p.text }
+        : { type: 'image', source: { type: 'base64', media_type: p.mime, data: p.data } },
+    ),
+  };
+}
 
 function headers(llm: ResolvedLlm): Record<string, string> {
   return { 'anthropic-version': '2023-06-01', ...(llm.apiKey ? { 'x-api-key': llm.apiKey } : {}) };
@@ -22,7 +35,7 @@ export const anthropicAdapter: ProviderAdapter = {
       model: llm.model,
       max_tokens: p.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       system: req.system || undefined,
-      messages: alternate(req.messages),
+      messages: alternate(req.messages).map(toAnthropic),
       temperature: p.temperature,
       top_p: p.topP,
     };

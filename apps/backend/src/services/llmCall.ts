@@ -3,6 +3,7 @@ import { costUsd, type LlmBinding } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
 import { usageLog } from '../db/schema.ts';
+import { loggedContent } from '../llm/content.ts';
 import { complete, type ChatRequest, type ChatResult, type FetchFn } from '../llm/index.ts';
 import { recordTrace } from '../observability.ts';
 import { resolveBinding } from './llmProfiles.ts';
@@ -46,7 +47,7 @@ export async function callWithBinding(
       provider: profile.provider,
       model: profile.model,
       params: params as Record<string, unknown>,
-      request: { system: req.system, messages: req.messages, json: req.json },
+      request: { system: req.system, messages: req.messages.map((m) => ({ role: m.role, content: loggedContent(m.content) })), json: req.json },
       response: res?.text ?? null,
       inputTokens: res?.usage.inputTokens ?? 0,
       outputTokens: res?.usage.outputTokens ?? 0,

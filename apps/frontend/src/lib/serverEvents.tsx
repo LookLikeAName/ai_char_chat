@@ -2,7 +2,16 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import type { AvatarDto, ClientMessage, ConversationDto, DebugEventDto, MessageDto, ServerEvent, TraceSummaryDto } from '@acc/shared';
+import {
+  messagePreview,
+  type AvatarDto,
+  type ClientMessage,
+  type ConversationDto,
+  type DebugEventDto,
+  type MessageDto,
+  type ServerEvent,
+  type TraceSummaryDto,
+} from '@acc/shared';
 import { qk } from './api.ts';
 import { showNotification } from './notify.ts';
 
@@ -91,7 +100,7 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
       const name = sender?.name ?? conv?.title ?? '新訊息';
       showNotification({
         title: conv?.type === 'group' ? `${name}（${conv.title}）` : name,
-        body: m.content,
+        body: messagePreview(m),
         icon: sender?.imageUrl,
         tag: m.conversationId,
         onClick: () => navigateRef.current(`/chats/${m.conversationId}`),

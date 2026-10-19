@@ -1,3 +1,4 @@
+import { joinContent } from './content.ts';
 import { LlmError, type ChatMessage, type ChatRequest, type FetchFn } from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
@@ -57,7 +58,7 @@ export function alternate(messages: ChatMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const m of messages) {
     const last = out[out.length - 1];
-    if (last && last.role === m.role) last.content += `\n\n${m.content}`;
+    if (last && last.role === m.role) last.content = joinContent(last.content, m.content);
     else out.push({ ...m });
   }
   if (out[0]?.role !== 'user') out.unshift({ role: 'user', content: '（對話開始）' });

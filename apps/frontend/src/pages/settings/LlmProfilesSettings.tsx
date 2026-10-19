@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_BASE_URLS,
+  defaultVision,
   PROVIDER_LABELS,
   PROVIDER_TYPES,
   type LlmParams,
@@ -74,6 +75,7 @@ interface FormState {
   /** 美元／每 100 萬 tokens；兩個都空白表示不估算費用 */
   priceIn: string;
   priceOut: string;
+  vision: 'auto' | 'yes' | 'no';
 }
 
 function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDone: (id: string | null) => void }) {
@@ -89,6 +91,7 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
     defaults: profile?.defaults ?? { temperature: 0.9 },
     priceIn: profile?.pricing ? String(profile.pricing.input) : '',
     priceOut: profile?.pricing ? String(profile.pricing.output) : '',
+    vision: !profile?.visionSet ? 'auto' : profile.vision ? 'yes' : 'no',
   });
   const [models, setModels] = useState<string[] | null>(null);
   const [test, setTest] = useState<LlmTestResult | { pending: true } | null>(null);
@@ -105,6 +108,7 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
       f.priceIn.trim() || f.priceOut.trim()
         ? { input: Math.max(0, Number(f.priceIn) || 0), output: Math.max(0, Number(f.priceOut) || 0) }
         : null,
+    vision: f.vision === 'auto' ? null : f.vision === 'yes',
   });
 
   const draft = (): LlmDraft => ({
@@ -250,6 +254,21 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
           </button>
           <TestResult result={test} />
         </div>
+      </section>
+
+      <section className="card">
+        <h2>圖片</h2>
+        <label className="field">
+          <span className="field-label">看得懂圖片</span>
+          <select value={f.vision} onChange={(e) => patch({ vision: e.target.value as FormState['vision'] })}>
+            <option value="auto">依供應商預設（{defaultVision(f.provider) ? '看得懂' : '看不懂'}）</option>
+            <option value="yes">看得懂</option>
+            <option value="no">看不懂</option>
+          </select>
+          <span className="hint">
+            看得懂的話，你傳的圖片會直接給 avatar 看；看不懂的話，改由系統工具模型（如果它看得懂）先寫一段描述。OpenAI 相容端點要看模型，例如 Ollama 的 llava、qwen2.5-vl 看得懂。
+          </span>
+        </label>
       </section>
 
       <section className="card">

@@ -3,6 +3,7 @@ import type { MessageDto } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { conversations, messages, type MessageMeta } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
+import { mediaUrl } from './avatars.ts';
 
 type MessageRow = typeof messages.$inferSelect;
 
@@ -18,6 +19,14 @@ export function messageToDto(m: MessageRow): MessageDto {
     systemKind: m.meta.systemKind ?? null,
     traceId: m.meta.traceId ?? null,
     proactive: !!m.meta.proactive,
+    image: m.meta.image
+      ? {
+          url: mediaUrl(m.meta.image.path)!,
+          width: m.meta.image.width,
+          height: m.meta.image.height,
+          description: m.meta.image.description ?? null,
+        }
+      : null,
   };
 }
 

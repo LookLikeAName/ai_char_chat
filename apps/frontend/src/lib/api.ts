@@ -27,6 +27,7 @@ import type {
   GroupInput,
   UsageSummaryDto,
   AuthStatusDto,
+  UploadDto,
   ImportRequest,
   ImportResultDto,
 } from '@acc/shared';
@@ -157,8 +158,13 @@ export const api = {
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>
     request<{ messages: MessageDto[]; hasMore: boolean }>('GET', `/api/conversations/${conversationId}/messages?limit=100`),
-  sendMessage: (conversationId: string, content: string) =>
-    request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content }),
+  sendMessage: (conversationId: string, content: string, image?: string) =>
+    request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content, image }),
+  upload: (blob: Blob) => {
+    const form = new FormData();
+    form.append('file', blob, blob instanceof File ? blob.name : 'image.jpg');
+    return request<UploadDto>('POST', '/api/uploads', form);
+  },
   markRead: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/read`),
   retryReply: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/retry`),
   createGroup: (input: GroupInput) => request<{ id: string }>('POST', '/api/conversations', input),

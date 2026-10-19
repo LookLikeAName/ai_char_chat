@@ -1,8 +1,9 @@
-import type { LlmParams, ProviderType } from '@acc/shared';
+import type { LlmParams, MessageContent, ProviderType } from '@acc/shared';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
-  content: string;
+  /** 文字，或文字與圖片混合（只有看得懂圖片的模型才會收到圖片） */
+  content: MessageContent;
 }
 
 export interface ChatRequest {
