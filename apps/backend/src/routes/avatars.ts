@@ -103,7 +103,14 @@ export async function avatarRoutes(app: FastifyInstance) {
     const row = await db.transaction(async (tx) => {
       const [a] = await tx
         .insert(avatars)
-        .values({ name: input.name, bio: input.bio, llm: input.llm, persona, personaLocks: input.personaLocks ?? [] })
+        .values({
+          name: input.name,
+          bio: input.bio,
+          llm: input.llm,
+          persona,
+          personaLocks: input.personaLocks ?? [],
+          dailyTokenLimit: input.dailyTokenLimit ?? 0,
+        })
         .returning();
       const [c] = await tx.insert(conversations).values({ type: 'dm' }).returning();
       await tx.insert(conversationMembers).values({ conversationId: c!.id, avatarId: a!.id });
@@ -128,6 +135,7 @@ export async function avatarRoutes(app: FastifyInstance) {
         llm: input.llm,
         ...(persona !== undefined ? { persona } : {}),
         ...(input.personaLocks !== undefined ? { personaLocks: input.personaLocks } : {}),
+        ...(input.dailyTokenLimit !== undefined ? { dailyTokenLimit: input.dailyTokenLimit } : {}),
         updatedAt: new Date(),
       })
       .where(eq(avatars.id, id))

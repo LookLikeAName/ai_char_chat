@@ -10,6 +10,7 @@ import { reflect } from '../memory/reflect.ts';
 import { latestImpression } from '../memory/store.ts';
 import { getMood, getRelationship, resetRelationship } from '../relationship/service.ts';
 import { loadSettings } from '../services/settings.ts';
+import { avatarUsageToday } from '../services/usage.ts';
 
 const idParams = z.object({ id: z.uuid() });
 const memoryParams = z.object({ id: z.uuid(), memoryId: z.uuid() });
@@ -28,7 +29,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
     await assertAvatar(id);
     const { timezone } = await loadSettings(db);
     const clock = localClock(new Date(), timezone);
-    const [mood, rel, impression, rows, log] = await Promise.all([
+    const [mood, rel, impression, rows, log, usageToday] = await Promise.all([
       getMood(db, id),
       getRelationship(db, id),
       latestImpression(db, id),
@@ -39,6 +40,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
         .orderBy(desc(memories.createdAt))
         .limit(MEMORY_LIST),
       getLifeLog(db, id, clock.date),
+      avatarUsageToday(db, id),
     ]);
     return {
       mood,
@@ -52,6 +54,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
         createdAt: m.createdAt.toISOString(),
       })),
       today: log ? eventsSoFar(log, clock.hhmm) : [],
+      usageToday,
     };
   });
 

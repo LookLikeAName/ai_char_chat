@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } from '@acc/shared';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
@@ -267,9 +268,9 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
-        <h2>用量</h2>
+        <h2>費用</h2>
         <label className="field">
-          <span className="field-label">每日 token 上限（0 表示不限）</span>
+          <span className="field-label">每日 token 上限（所有 avatar 與系統工具加起來；0 表示不限）</span>
           <input
             type="number"
             min={0}
@@ -277,7 +278,10 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
             value={s.dailyTokenLimit}
             onChange={(e) => patch({ dailyTokenLimit: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
           />
-          <span className="hint">用量統計與上限在第 8 階段生效。</span>
+          <span className="hint">
+            超過之後 avatar 暫時不回覆、不主動發話，也不整理記憶，隔天（依上面的時區）自動恢復；你自己按的「AI 補完」「一致性檢查」不受限。每個 avatar 也可以在「大腦」另外設上限。用量與費用在
+            <Link to="/settings/usage">設定 → 用量</Link>。
+          </span>
         </label>
       </section>
 

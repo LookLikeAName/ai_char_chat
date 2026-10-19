@@ -66,6 +66,18 @@ export const PARAM_SPECS: readonly ParamSpec[] = [
   },
 ];
 
+/** 價格（美元／每 100 萬 tokens），用來估算費用；不填就不算 */
+export const llmPricingSchema = z.object({
+  input: z.number().min(0).max(10000),
+  output: z.number().min(0).max(10000),
+});
+export type LlmPricing = z.infer<typeof llmPricingSchema>;
+
+export function costUsd(pricing: LlmPricing | null | undefined, inputTokens: number, outputTokens: number): number {
+  if (!pricing) return 0;
+  return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+}
+
 export const llmProfileInputSchema = z
   .object({
     name: z.string().trim().min(1).max(60),
@@ -75,6 +87,7 @@ export const llmProfileInputSchema = z
     /** 只寫不讀：undefined 表示不變更，null 表示清除 */
     apiKey: z.string().trim().min(1).nullable().optional(),
     defaults: llmParamsSchema.default({}),
+    pricing: llmPricingSchema.nullable().default(null),
   })
   .refine((p) => p.provider !== 'openai-compatible' || !!p.baseUrl, {
     message: 'OpenAI 相容端點必須填寫 Base URL',
@@ -93,6 +106,7 @@ export interface LlmProfileDto {
   /** 例如 "…a1b2"，讓使用者分辨是哪一把 key */
   apiKeyHint: string | null;
   defaults: LlmParams;
+  pricing: LlmPricing | null;
   /** 綁定這個設定檔的 avatar 數量 */
   usedBy: number;
   createdAt: string;

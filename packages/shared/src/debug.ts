@@ -1,6 +1,6 @@
 // 除錯與監控：事件 log 與 LLM 呼叫紀錄（含完整 context）的資料格式。
 
-export const EVENT_CATEGORIES = ['reply', 'state', 'memory', 'proactive', 'life', 'group', 'llm', 'job', 'system'] as const;
+export const EVENT_CATEGORIES = ['reply', 'state', 'memory', 'proactive', 'life', 'group', 'llm', 'usage', 'job', 'system'] as const;
 export type EventCategory = (typeof EVENT_CATEGORIES)[number];
 export type EventLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -12,6 +12,7 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   life: '生活日誌',
   group: '群組',
   llm: 'LLM',
+  usage: '用量',
   job: '工作佇列',
   system: '系統',
 };

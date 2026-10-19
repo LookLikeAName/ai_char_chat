@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigserial,
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -22,6 +23,7 @@ import type {
   LifeLogEvent,
   LlmBinding,
   LlmParams,
+  LlmPricing,
   Mood,
   PersonaDraft,
   Preferences,
@@ -63,6 +65,7 @@ export const llmProfiles = pgTable('llm_profiles', {
   apiKeyEnc: text('api_key_enc'),
   apiKeyHint: text('api_key_hint'),
   defaults: jsonb('defaults').$type<LlmParams>().notNull().default({}),
+  pricing: jsonb('pricing').$type<LlmPricing | null>(),
   ...timestamps,
 });
 
@@ -76,6 +79,8 @@ export const avatars = pgTable('avatars', {
   /** 玩家鎖定的人格欄位 */
   personaLocks: jsonb('persona_locks').$type<string[]>().notNull().default([]),
   llm: jsonb('llm').$type<LlmBinding | null>(),
+  /** 每天最多用多少 tokens（0 = 不限） */
+  dailyTokenLimit: integer('daily_token_limit').notNull().default(0),
   ...timestamps,
 });
 
@@ -152,10 +157,12 @@ export const usageLog = pgTable(
     inputTokens: integer('input_tokens').notNull().default(0),
     outputTokens: integer('output_tokens').notNull().default(0),
     latencyMs: integer('latency_ms').notNull().default(0),
+    /** 依當時設定檔的價格估算 */
+    costUsd: doublePrecision('cost_usd').notNull().default(0),
     ok: boolean('ok').notNull(),
     error: text('error'),
   },
-  (t) => [index('usage_log_created_idx').on(t.createdAt)],
+  (t) => [index('usage_log_created_idx').on(t.createdAt), index('usage_log_avatar_created_idx').on(t.avatarId, t.createdAt)],
 );
 
 /** 玩家的 profile（單人使用，只有一列 id = 1） */

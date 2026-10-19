@@ -35,12 +35,4 @@ export function useNames() {
   return { avatars, conversations, avatarName, conversationName };
 }
 
-export const PURPOSE_LABELS: Record<string, string> = {
-  reply: '回覆',
-  'persona.generate': '補完角色',
-  'persona.check': '一致性檢查',
-  'profile.summary': '玩家摘要',
-  'memory.extract': '記憶萃取',
-  'memory.reflect': '整理印象',
-  'life.log': '生活日誌',
-};
+export { USAGE_PURPOSE_LABELS as PURPOSE_LABELS } from '@acc/shared';

@@ -2,10 +2,12 @@ import { NavLink, Navigate, Route, Routes } from 'react-router';
 import { GeneralSettings } from './GeneralSettings.tsx';
 import { LlmProfilesSettings } from './LlmProfilesSettings.tsx';
 import { SystemStatus } from './SystemStatus.tsx';
+import { UsageSettings } from './UsageSettings.tsx';
 
 const TABS = [
   { to: 'general', label: '一般' },
   { to: 'llm', label: 'LLM 設定檔' },
+  { to: 'usage', label: '用量' },
   { to: 'system', label: '系統狀態' },
 ];
 
@@ -29,6 +31,7 @@ export function SettingsPage() {
           <Route index element={<Navigate to="general" replace />} />
           <Route path="general" element={<GeneralSettings />} />
           <Route path="llm/*" element={<LlmProfilesSettings />} />
+          <Route path="usage" element={<UsageSettings />} />
           <Route path="system" element={<SystemStatus />} />
         </Routes>
       </main>

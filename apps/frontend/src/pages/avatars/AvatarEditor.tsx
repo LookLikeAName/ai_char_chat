@@ -42,6 +42,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   });
   const [llm, setLlm] = useState<LlmBinding | null>(avatar?.llm ?? null);
   const [initialStage, setInitialStage] = useState<InitialStage>('stranger');
+  const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
 
   const empty = isPersonaEmpty(p.persona);
   const missing = empty ? [] : missingFields(p.persona);
@@ -50,6 +51,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
     (p.name !== avatar.name ||
       p.bio !== avatar.bio ||
       !deepEqual(llm, avatar.llm) ||
+      tokenLimit !== avatar.dailyTokenLimit ||
       !deepEqual(p.persona, avatar.persona) ||
       !deepEqual([...p.locks].sort(), [...avatar.personaLocks].sort()));
 
@@ -88,6 +90,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
             llm,
             persona: p.persona,
             personaLocks: p.locks,
+            dailyTokenLimit: tokenLimit,
             ...(avatar ? {} : { initialStage }),
           });
         }
@@ -162,6 +165,20 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
             選一個在設定頁建立的 LLM 設定檔。供應商、模型、API key 在設定檔統一管理，這裡只調整這個 avatar 自己的參數。
           </p>
           <LlmBindingEditor value={llm} onChange={setLlm} />
+          <label className="field">
+            <span className="field-label">每日 token 上限（0 表示不限）</span>
+            <input
+              type="number"
+              className="narrow-input"
+              min={0}
+              step={1000}
+              value={tokenLimit}
+              onChange={(e) => setTokenLimit(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+            />
+            <span className="hint">
+              包含回覆、主動發話、整理它的記憶與生活日誌。超過之後它今天不再回覆，隔天自動恢復。全部加起來的上限在「設定 → 一般 → 費用」。
+            </span>
+          </label>
         </section>
       )}
 

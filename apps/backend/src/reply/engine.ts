@@ -33,6 +33,7 @@ import { attachParsed, logEvent, withScope } from '../observability.ts';
 import { loadProfile } from '../profile/service.ts';
 import { applyInteraction, getMood, getRelationship, setMood } from '../relationship/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
+import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
@@ -126,12 +127,14 @@ export class ReplyEngine {
 
         if (!ctx.avatar.llm) {
           await this.noticeOnce(
-            ctx,
+            conversationId,
             `${ctx.avatar.name} 還沒有設定大腦（LLM）。到 avatar 設定頁綁定一個 LLM 設定檔後，就能開始回覆。`,
           );
           await this.markHandled(ctx, snapshot);
           return 'done';
         }
+        // 超過每日上限：先不回（不標記處理過），調高上限後按「重試」或再傳一則就會回
+        if (await this.overQuota(conversationId, ctx.avatar, true)) return 'done';
 
         // 第一輪才有「怎麼看到訊息」的情境；之後是正在聊天中
         const situation: PromptSituation =
@@ -200,6 +203,7 @@ export class ReplyEngine {
       if (!ctx?.avatar.llm) return 'skipped';
       const latestUser = await this.latestUserMessageAt(conversationId);
       if (latestUser && (!ctx.handledUpTo || latestUser > ctx.handledUpTo)) return 'skipped';
+      if (await this.overQuota(conversationId, ctx.avatar, false)) return 'skipped';
 
       const startedAt = this.now();
       const output = await this.generate(ctx, { mode: 'proactive' });
@@ -330,6 +334,11 @@ export class ReplyEngine {
         );
       const text = unanswered.map((m) => m.content).join('\n');
       const settings = await loadSettings(db);
+      const globalQuota = await quotaStatus(db, null, now);
+      if (globalQuota.over) {
+        await this.quotaNotice(conversationId, null, 'global');
+        return 'done';
+      }
       const memberRows = await db
         .select({ avatar: avatars })
         .from(conversationMembers)
@@ -345,6 +354,11 @@ export class ReplyEngine {
       const candidates: SpeakerCandidate[] = [];
       for (const { avatar } of memberRows) {
         if (!avatar.llm) continue;
+        // 超過自己的每日上限：這一輪不參加
+        if ((await quotaStatus(db, avatar.id, now)).over) {
+          await logEvent({ category: 'usage', type: 'usage.quota', level: 'warn', avatarId: avatar.id, message: `${avatar.name} 今天的用量已達上限，這一輪不回` });
+          continue;
+        }
         const rel = await getRelationship(db, avatar.id);
         const p = avatar.persona;
         const interests = [p.preferences?.hobbies, p.preferences?.likes, p.preferences?.favoriteTopics, [p.basic?.occupation ?? '']]
@@ -401,7 +415,19 @@ export class ReplyEngine {
         await this.markSeen(ctx, snapshot);
         await this.sleep(readPauseMs(this.random));
         await setTyping(cand.id, true);
-        const output = await this.generate(ctx, { mode: 'group', mentioned: cand.mentioned, before: [...spoken] });
+        let output: Awaited<ReturnType<typeof this.generate>>;
+        try {
+          output = await this.generate(ctx, { mode: 'group', mentioned: cand.mentioned, before: [...spoken] });
+        } catch (err) {
+          // 這一輪中途用完了上限：換下一個人（全域上限用完的話，下一個人也會停在這裡）
+          if (!(err instanceof QuotaError)) throw err;
+          await setTyping(cand.id, false);
+          if (err.scope === 'global') {
+            await this.quotaNotice(conversationId, null, 'global');
+            break;
+          }
+          continue;
+        }
         if (!output.messages.length) {
           await setTyping(cand.id, false);
           await logEvent({
@@ -496,6 +522,7 @@ export class ReplyEngine {
         if (!conv || conv.type !== 'group' || !ctx?.avatar.llm) return 'skipped';
         const latestUser = await this.latestUserMessageAt(conversationId);
         if (latestUser && (!conv.handledUpTo || latestUser > conv.handledUpTo)) return 'skipped';
+        if (await this.overQuota(conversationId, ctx.avatar, false)) return 'skipped';
         const output = await this.generate(ctx, { mode: 'proactive' });
         if (!output.messages.length) return 'skipped';
         let sent = 0;
@@ -889,19 +916,48 @@ export class ReplyEngine {
   }
 
   /** 同樣的提示已經是最後一則系統訊息時就不再重複 */
-  private async noticeOnce(ctx: Ctx, content: string): Promise<void> {
+  /**
+   * 超過每日上限時留一則提示（同樣的提示不重複留）並回傳 true。
+   * withRetry：一對一回覆用「錯誤」樣式，玩家調高上限後可以按「重試」。
+   */
+  private async overQuota(conversationId: string, avatar: { id: string; name: string }, withRetry: boolean): Promise<boolean> {
+    const q = await quotaStatus(this.deps.db, avatar.id, this.now());
+    if (!q.over) return false;
+    if (withRetry) await this.quotaNotice(conversationId, avatar.name, q.over);
+    else {
+      await logEvent({
+        category: 'usage',
+        type: 'usage.quota',
+        level: 'warn',
+        avatarId: avatar.id,
+        message: `${avatar.name}：${q.over === 'global' ? '今天的總用量' : '它今天的用量'}已達上限，不主動發話`,
+      });
+    }
+    return true;
+  }
+
+  private async quotaNotice(conversationId: string, name: string | null, scope: 'global' | 'avatar') {
+    const content =
+      scope === 'global'
+        ? `今天的總用量已達上限，avatar 暫時不會回覆，明天會自動恢復。要繼續的話到「設定 → 一般 → 費用」調高上限，再按重試。`
+        : `${name} 今天的用量已達上限，明天才會回覆。要繼續的話到它的設定頁「大腦」調高上限，再按重試。`;
+    await logEvent({ category: 'usage', type: 'usage.quota', level: 'warn', message: content });
+    await this.noticeOnce(conversationId, content, 'error');
+  }
+
+  private async noticeOnce(conversationId: string, content: string, kind: 'notice' | 'error' = 'notice'): Promise<void> {
     const [last] = await this.deps.db
       .select({ content: messages.content })
       .from(messages)
-      .where(and(eq(messages.conversationId, ctx.conversationId), ne(messages.senderType, 'user')))
+      .where(and(eq(messages.conversationId, conversationId), ne(messages.senderType, 'user')))
       .orderBy(desc(messages.createdAt), desc(messages.seq))
       .limit(1);
     if (last?.content === content) return;
     await postMessage(this.deps.db, this.deps.events, {
-      conversationId: ctx.conversationId,
+      conversationId,
       senderType: 'system',
       content,
-      meta: { systemKind: 'notice' },
+      meta: { systemKind: kind },
     });
   }
 }

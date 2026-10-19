@@ -17,6 +17,7 @@ import { setupObservability } from './observabilitySetup.ts';
 import { backfillEmbeddings } from './memory/store.ts';
 import { ReplyEngine } from './reply/engine.ts';
 import { loadSettings } from './services/settings.ts';
+import { QuotaError } from './services/usage.ts';
 
 const HEARTBEAT_MS = 10_000;
 /** 對話正被另一個工作處理時，多久後再試 */
@@ -84,41 +85,52 @@ async function maintenance() {
   }
 }
 
+async function processJob(data: AgentJob) {
+  switch (data.kind) {
+    case 'reply': {
+      const result = await engine.handle(data.conversationId, { force: data.force });
+      if (result === 'busy') await queue.add('reply', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
+      return result;
+    }
+    case 'memory.extract': {
+      const result = await handleExtract(data.avatarId, data.conversationId, data.force);
+      if (result === 'busy') await queue.add('memory.extract', data, { ...MEMORY_JOB_OPTIONS, ...KEEP, delay: 30_000 });
+      return result;
+    }
+    case 'maintenance':
+      return maintenance();
+    case 'proactive.tick': {
+      const settings = await loadSettings(db);
+      const decisions = await proactiveTick(ctx, settings, (j, delay) =>
+        queue.add(j.kind, j, { ...KEEP, delay, attempts: 1 }).then(() => undefined),
+      );
+      const sent = decisions.filter((d) => d.action === 'enqueued');
+      if (sent.length) console.log(`[proactive] ${sent.length} 個 avatar 決定主動傳訊息`);
+      return decisions;
+    }
+    case 'proactive':
+      return engine.handleProactive(data.conversationId);
+    case 'group.turn': {
+      const result = await engine.handleGroupTurn(data.conversationId, { force: data.force });
+      if (result === 'busy') await queue.add('group.turn', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
+      return result;
+    }
+    case 'group.proactive':
+      return engine.handleGroupProactive(data.conversationId, data.avatarId);
+  }
+}
+
 const worker = new Worker<AgentJob>(
   AGENT_QUEUE,
   async (job) => {
-    const data = job.data;
-    switch (data.kind) {
-      case 'reply': {
-        const result = await engine.handle(data.conversationId, { force: data.force });
-        if (result === 'busy') await queue.add('reply', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
-        return result;
-      }
-      case 'memory.extract': {
-        const result = await handleExtract(data.avatarId, data.conversationId, data.force);
-        if (result === 'busy') await queue.add('memory.extract', data, { ...MEMORY_JOB_OPTIONS, ...KEEP, delay: 30_000 });
-        return result;
-      }
-      case 'maintenance':
-        return maintenance();
-      case 'proactive.tick': {
-        const settings = await loadSettings(db);
-        const decisions = await proactiveTick(ctx, settings, (j, delay) =>
-          queue.add(j.kind, j, { ...KEEP, delay, attempts: 1 }).then(() => undefined),
-        );
-        const sent = decisions.filter((d) => d.action === 'enqueued');
-        if (sent.length) console.log(`[proactive] ${sent.length} 個 avatar 決定主動傳訊息`);
-        return decisions;
-      }
-      case 'proactive':
-        return engine.handleProactive(data.conversationId);
-      case 'group.turn': {
-        const result = await engine.handleGroupTurn(data.conversationId, { force: data.force });
-        if (result === 'busy') await queue.add('group.turn', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
-        return result;
-      }
-      case 'group.proactive':
-        return engine.handleGroupProactive(data.conversationId, data.avatarId);
+    try {
+      return await processJob(job.data);
+    } catch (err) {
+      // 超過每日上限：重試也沒用，記一筆就結束（回覆的話留一則提示，玩家可以調高上限後重試）
+      if (!(err instanceof QuotaError)) throw err;
+      await logEvent({ category: 'usage', type: 'usage.quota', level: 'warn', message: `工作 ${job.data.kind} 略過：${err.message}` });
+      if (job.data.kind === 'reply') await engine.reportFailure(job.data.conversationId, err);
+      return 'quota';
     }
   },
   // 每個對話有自己的鎖，不同對話可以同時處理

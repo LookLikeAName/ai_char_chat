@@ -18,6 +18,8 @@ export const avatarInputSchema = z.object({
     .array(z.string())
     .transform((a) => [...new Set(a)].filter((p) => PERSONA_PATHS.includes(p)))
     .optional(),
+  /** 每天最多用多少 tokens（0 = 不限）；省略表示不變更 */
+  dailyTokenLimit: z.number().int().min(0).max(1_000_000_000).optional(),
   /** 只在建立時使用：和玩家的初始關係 */
   initialStage: z.enum(INITIAL_STAGES).optional(),
 });
@@ -34,6 +36,8 @@ export interface AvatarDto {
   personaLocks: PersonaPath[];
   /** 人格設定是否已全部填滿 */
   personaComplete: boolean;
+  /** 每天最多用多少 tokens（0 = 不限） */
+  dailyTokenLimit: number;
   /** 依作息推算的目前狀態 */
   availability: { status: 'free' | 'busy' | 'sleep'; activity: string; until: string | null };
   /** 這個 avatar 的一對一聊天 */

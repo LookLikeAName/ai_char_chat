@@ -25,6 +25,7 @@ export function profileToDto(row: ProfileRow, usedBy: number): LlmProfileDto {
     hasApiKey: !!row.apiKeyEnc,
     apiKeyHint: row.apiKeyHint,
     defaults: row.defaults,
+    pricing: row.pricing ?? null,
     usedBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

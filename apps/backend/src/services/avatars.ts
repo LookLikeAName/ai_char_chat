@@ -21,6 +21,7 @@ export function avatarToDto(
     persona: row.persona,
     personaLocks: row.personaLocks,
     personaComplete: !isPersonaEmpty(row.persona) && missingFields(row.persona).length === 0,
+    dailyTokenLimit: row.dailyTokenLimit,
     availability: { status: a.status, activity: a.activity, until: a.until?.toISOString() ?? null },
     dmConversationId,
     createdAt: row.createdAt.toISOString(),

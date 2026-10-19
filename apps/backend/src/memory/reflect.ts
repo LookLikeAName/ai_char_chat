@@ -56,7 +56,7 @@ ${fresh.map((m) => `- ${m.content}`).join('\n')}
     settings,
     { system: '你在幫角色整理心裡的想法。', messages: [{ role: 'user', content }] },
     'memory.reflect',
-    { json: false },
+    { json: false, avatarId },
   );
   const impression = text.trim().slice(0, 1000);
   if (!impression) return false;

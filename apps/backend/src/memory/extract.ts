@@ -92,7 +92,7 @@ importance：1 = 小事，5 = 值得記得，10 = 非常重要、會一直記得
 # 輸出格式
 {"memories": [{"content": "…", "importance": 5}]}；沒有值得記的就輸出 {"memories": []}。`;
 
-  const text = await callUtility(ctx, settings, { system: '你負責整理角色的記憶。只輸出 JSON。', messages: [{ role: 'user', content }] }, 'memory.extract');
+  const text = await callUtility(ctx, settings, { system: '你負責整理角色的記憶。只輸出 JSON。', messages: [{ role: 'user', content }] }, 'memory.extract', { avatarId });
   const out = parseJsonObject(text);
   const items = (Array.isArray(out?.memories) ? out.memories : [])
     .filter((m): m is { content: string; importance?: number } => !!m && typeof (m as { content?: unknown }).content === 'string')

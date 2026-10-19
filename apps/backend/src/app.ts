@@ -19,6 +19,8 @@ import { healthRoutes } from './routes/health.ts';
 import { llmProfileRoutes } from './routes/llmProfiles.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
+import { usageRoutes } from './routes/usage.ts';
+import { QuotaError } from './services/usage.ts';
 import { WsHub } from './ws.ts';
 
 export interface AppDeps {
@@ -50,6 +52,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (err instanceof HttpError) {
       return reply.status(err.statusCode).send({ error: err.message, details: err.details });
     }
+    if (err instanceof QuotaError) return reply.status(429).send({ error: err.message });
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.status(status).send({ error: (err as Error).message });
     app.log.error(err);
@@ -73,6 +76,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(conversationRoutes);
       await api.register(profileRoutes);
       await api.register(debugRoutes);
+      await api.register(usageRoutes);
     },
     { prefix: '/api' },
   );

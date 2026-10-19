@@ -44,7 +44,7 @@ ${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}
 # 輸出格式
 {"events": [{"time": "08:10", "text": "…"}]}`;
 
-  const text = await callUtility(ctx, settings, { system: '你在替角色安排生活。只輸出 JSON。', messages: [{ role: 'user', content }] }, 'life.log');
+  const text = await callUtility(ctx, settings, { system: '你在替角色安排生活。只輸出 JSON。', messages: [{ role: 'user', content }] }, 'life.log', { avatarId: avatar.id });
   const out = parseJsonObject(text);
   const events = (Array.isArray(out?.events) ? out.events : [])
     .filter(

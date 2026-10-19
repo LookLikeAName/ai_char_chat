@@ -53,6 +53,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         apiKeyEnc: input.apiKey ? box.encrypt(input.apiKey) : null,
         apiKeyHint: input.apiKey ? keyHint(input.apiKey) : null,
         defaults: input.defaults,
+        pricing: input.pricing,
       })
       .returning();
     await events.publish({ type: 'llmProfiles.changed' });
@@ -77,6 +78,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         baseUrl: input.baseUrl ?? null,
         model: input.model,
         defaults: input.defaults,
+        pricing: input.pricing,
         ...keyFields,
         updatedAt: new Date(),
       })

@@ -218,6 +218,8 @@ export interface AvatarStateDto {
   memories: MemoryDto[];
   /** 今天到目前為止的生活日誌 */
   today: { time: string; text: string }[];
+  /** 今天用了多少 tokens 與上限（0 = 不限）；global 是全域的 */
+  usageToday: { tokens: number; costUsd: number; limit: number; globalTokens: number; globalLimit: number };
 }
 
 export const resetRelationshipSchema = z.object({ stage: z.enum(INITIAL_STAGES) });

@@ -25,6 +25,7 @@ import type {
   ProviderType,
   InstrumentId,
   GroupInput,
+  UsageSummaryDto,
 } from '@acc/shared';
 
 export class ApiError extends Error {
@@ -106,6 +107,8 @@ export const api = {
     request<ProfileDto>('PATCH', '/api/profile/answers', { instrument, answers }),
   setSummary: (summary: string) => request<ProfileDto>('PUT', '/api/profile/summary', { summary }),
   generateSummary: () => request<ProfileDto>('POST', '/api/profile/summary/generate'),
+
+  usage: (days: number) => request<UsageSummaryDto>('GET', `/api/usage?days=${days}`),
 
   avatarState: (id: string) => request<AvatarStateDto>('GET', `/api/avatars/${id}/state`),
   deleteMemory: (id: string, memoryId: string) => request<void>('DELETE', `/api/avatars/${id}/memories/${memoryId}`),

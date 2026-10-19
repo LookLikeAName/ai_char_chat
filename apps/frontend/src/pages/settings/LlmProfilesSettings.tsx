@@ -71,6 +71,9 @@ interface FormState {
   apiKey: string;
   clearKey: boolean;
   defaults: LlmParams;
+  /** 美元／每 100 萬 tokens；兩個都空白表示不估算費用 */
+  priceIn: string;
+  priceOut: string;
 }
 
 function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDone: (id: string | null) => void }) {
@@ -84,6 +87,8 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
     apiKey: '',
     clearKey: false,
     defaults: profile?.defaults ?? { temperature: 0.9 },
+    priceIn: profile?.pricing ? String(profile.pricing.input) : '',
+    priceOut: profile?.pricing ? String(profile.pricing.output) : '',
   });
   const [models, setModels] = useState<string[] | null>(null);
   const [test, setTest] = useState<LlmTestResult | { pending: true } | null>(null);
@@ -96,6 +101,10 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
     model: f.model,
     apiKey: f.apiKey.trim() ? f.apiKey.trim() : f.clearKey ? null : undefined,
     defaults: f.defaults,
+    pricing:
+      f.priceIn.trim() || f.priceOut.trim()
+        ? { input: Math.max(0, Number(f.priceIn) || 0), output: Math.max(0, Number(f.priceOut) || 0) }
+        : null,
   });
 
   const draft = (): LlmDraft => ({
@@ -240,6 +249,37 @@ function ProfileForm({ profile, onDone }: { profile: LlmProfileDto | null; onDon
             測試連線
           </button>
           <TestResult result={test} />
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>價格（選填）</h2>
+        <p className="hint">填了之後，「設定 → 用量」會估算費用。單位是美元／每 100 萬 tokens，請照供應商的價目表填。</p>
+        <div className="row">
+          <label className="field">
+            <span className="field-label">輸入</span>
+            <input
+              type="number"
+              className="narrow-input"
+              min={0}
+              step={0.01}
+              value={f.priceIn}
+              placeholder="例如 0.3"
+              onChange={(e) => patch({ priceIn: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">輸出</span>
+            <input
+              type="number"
+              className="narrow-input"
+              min={0}
+              step={0.01}
+              value={f.priceOut}
+              placeholder="例如 2.5"
+              onChange={(e) => patch({ priceOut: e.target.value })}
+            />
+          </label>
         </div>
       </section>
 

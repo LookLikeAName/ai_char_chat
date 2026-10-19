@@ -189,6 +189,21 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
           </button>
         )}
       </dd>
+      <dt>今天的用量</dt>
+      <dd>
+        <span className="hint">
+          {state.usageToday.tokens.toLocaleString()} tokens
+          {state.usageToday.costUsd > 0 && `（約 $${state.usageToday.costUsd.toFixed(state.usageToday.costUsd < 0.01 ? 4 : 2)}）`}
+          {state.usageToday.limit > 0 && `，上限 ${state.usageToday.limit.toLocaleString()}`}
+        </span>
+        {(state.usageToday.limit > 0 && state.usageToday.tokens >= state.usageToday.limit) ||
+        (state.usageToday.globalLimit > 0 && state.usageToday.globalTokens >= state.usageToday.globalLimit) ? (
+          <span className="warn-text">已達上限，今天暫時不會回覆</span>
+        ) : null}
+        <Link className="hint" to="/settings/usage">
+          用量統計 →
+        </Link>
+      </dd>
       <dt>除錯</dt>
       <dd>
         <Link className="hint" to="/monitor/events">
