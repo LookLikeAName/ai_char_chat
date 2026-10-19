@@ -115,6 +115,22 @@ export const avatars = pgTable('avatars', {
   ...timestamps,
 });
 
+/** 相關的角色（無方向）：a_id < b_id，一對只存一列，關係描述雙方共用 */
+export const avatarLinks = pgTable(
+  'avatar_links',
+  {
+    aId: uuid('a_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    bId: uuid('b_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    relation: text('relation').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.aId, t.bId] }), index('avatar_links_b_idx').on(t.bId)],
+);
+
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   type: text('type').$type<'dm' | 'group'>().notNull(),

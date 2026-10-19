@@ -17,10 +17,11 @@ import {
   type ImportResultDto,
   type TransferFile,
 } from '@acc/shared';
-import { avatars, avatarState, conversationMembers, conversations, memories, messages, relationships } from '../db/schema.ts';
+import { avatarLinks, avatars, avatarState, conversationMembers, conversations, memories, messages, relationships } from '../db/schema.ts';
 import { notFound, parseBody } from '../errors.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { backfillEmbeddings } from '../memory/store.ts';
+import { loadLinks } from '../services/avatarLinks.ts';
 import { avatarPhoto, validatePersona } from '../services/avatars.ts';
 import { assertProfileExists } from '../services/llmProfiles.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -122,8 +123,14 @@ export async function transferRoutes(app: FastifyInstance) {
   app.get('/avatars/export', async (req, reply) => {
     const opts = parseBody(exportOptionsSchema, req.query);
     const rows = await db.select().from(avatars).orderBy(asc(avatars.createdAt));
+    const links = await loadLinks(db);
+    const index = new Map(rows.map((r, i) => [r.id, i]));
     const cards = [];
-    for (const r of rows) cards.push(await card(r, opts));
+    for (const r of rows) {
+      const c = await card(r, opts);
+      const own = (links.get(r.id) ?? []).flatMap((l) => (index.has(l.avatarId) ? [{ index: index.get(l.avatarId)!, relation: l.relation }] : []));
+      cards.push(own.length ? { ...c, links: own } : c);
+    }
     return reply.header('content-disposition', attachment('avatars')).send(file(cards));
   });
 
@@ -227,6 +234,28 @@ export async function transferRoutes(app: FastifyInstance) {
           }
           const created = { id: avatarId, dmConversationId: conv!.id };
           result.push({ ...created, name: c.name, memories: mems.length, messages: msgs.length });
+        }
+        // 檔案裡互相關聯的 avatar（每一對只存一次，a_id < b_id）
+        const pairs = new Map<string, { aId: string; bId: string; relation: string }>();
+        prepared.forEach(({ c }, i) => {
+          for (const l of c.links ?? []) {
+            const other = result[l.index];
+            if (!other || l.index === i) continue;
+            const [aId, bId] = [result[i]!.id, other.id].sort() as [string, string];
+            if (!pairs.has(`${aId}:${bId}`)) pairs.set(`${aId}:${bId}`, { aId, bId, relation: l.relation });
+          }
+        });
+        if (pairs.size) {
+          await tx.insert(avatarLinks).values([...pairs.values()]);
+          await tx
+            .insert(relationships)
+            .values(
+              [...pairs.values()].flatMap((p) => [
+                { avatarId: p.aId, target: `avatar:${p.bId}`, stage: 'acquaintance' as const, ...INITIAL_VALUES.acquaintance },
+                { avatarId: p.bId, target: `avatar:${p.aId}`, stage: 'acquaintance' as const, ...INITIAL_VALUES.acquaintance },
+              ]),
+            )
+            .onConflictDoNothing();
         }
       });
     } catch (err) {

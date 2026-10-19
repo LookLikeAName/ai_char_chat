@@ -2918,6 +2918,48 @@ fieldset.field {
   text-decoration: none;
 }
 
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.related-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.related-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.related-body .member-name {
+  color: inherit;
+  text-decoration: none;
+}
+
+.related-body .member-name:hover {
+  text-decoration: underline;
+}
+
+.related-add {
+  display: flex;
+  gap: 8px;
+}
+
+.related-add select {
+  flex: 1;
+  min-width: 0;
+}
+
 .import-list {
   display: flex;
   flex-direction: column;

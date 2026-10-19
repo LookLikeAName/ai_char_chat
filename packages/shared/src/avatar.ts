@@ -5,6 +5,17 @@ import { PERSONA_PATHS, type PersonaDraft, type PersonaPath } from './persona.ts
 import { INITIAL_STAGES } from './relationship.ts';
 
 
+/**
+ * 相關的角色：例如同一間公司的同事。雙方共用同一句關係描述，用名字寫清楚誰是誰
+ * （「同一間設計公司的同事，林小雨是阿哲的主管」）。
+ */
+export const avatarLinkSchema = z.object({
+  avatarId: z.uuid(),
+  relation: z.string().trim().min(1, '請寫一句你們的關係').max(200),
+});
+export type AvatarLink = z.infer<typeof avatarLinkSchema>;
+export const MAX_AVATAR_LINKS = 12;
+
 export const avatarInputSchema = z.object({
   name: z.string().trim().min(1).max(40),
   bio: z.string().trim().max(500).default(''),
@@ -21,6 +32,8 @@ export const avatarInputSchema = z.object({
     .optional(),
   /** 每天最多用多少 tokens（0 = 不限）；省略表示不變更 */
   dailyTokenLimit: z.number().int().min(0).max(1_000_000_000).optional(),
+  /** 相關的角色（整份取代）；省略表示不變更 */
+  links: z.array(avatarLinkSchema).max(MAX_AVATAR_LINKS).optional(),
   /** 傳照片的方式（入鏡方式、參考圖、風格）；省略表示不變更 */
   photo: avatarPhotoSchema.optional(),
   /** 只在建立時使用：和玩家的初始關係 */
@@ -42,6 +55,8 @@ export interface AvatarDto {
   /** 每天最多用多少 tokens（0 = 不限） */
   dailyTokenLimit: number;
   photo: AvatarPhoto;
+  /** 相關的角色（不管是哪一邊設定的都會列出來） */
+  links: AvatarLink[];
   /** 另外上傳的照片參考圖 */
   photoReferenceUrl: string | null;
   /** 依作息推算的目前狀態 */
@@ -62,6 +77,8 @@ export const personaGenerateSchema = z.object({
   seed: z.string().trim().max(500).optional(),
   /** 要（重新）產生的欄位；省略表示所有還沒填的欄位 */
   only: z.array(z.string()).optional(),
+  /** 參考的角色：新設定要和他們一致 */
+  references: z.array(avatarLinkSchema).max(MAX_AVATAR_LINKS).default([]),
 });
 export type PersonaGenerateInput = z.input<typeof personaGenerateSchema>;
 
@@ -80,6 +97,7 @@ export const personaCheckSchema = z.object({
   bio: z.string().trim().max(500).default(''),
   persona: z.record(z.string(), z.unknown()),
   locks: z.array(z.string()).default([]),
+  references: z.array(avatarLinkSchema).max(MAX_AVATAR_LINKS).default([]),
 });
 
 export interface PersonaIssue {

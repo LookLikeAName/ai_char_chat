@@ -16,6 +16,7 @@ import { checkPersona } from '../persona/check.ts';
 import { generatePersona } from '../persona/generate.ts';
 import { inspectImage } from '../images/inspect.ts';
 import { avatarToDto, mediaUrl, validatePersona } from '../services/avatars.ts';
+import { assertLinkTargets, loadLinks, saveLinks } from '../services/avatarLinks.ts';
 import { takePhoto } from '../services/photos.ts';
 import { assertProfileExists, getProfile, resolveRow } from '../services/llmProfiles.ts';
 import { getRelationship } from '../relationship/service.ts';
@@ -52,7 +53,8 @@ export async function avatarRoutes(app: FastifyInstance) {
 
   async function dto(row: typeof avatars.$inferSelect) {
     const { timezone } = await loadSettings(db);
-    return avatarToDto(row, (await dmMap(db, [row.id])).get(row.id)!, timezone);
+    const links = (await loadLinks(db, [row.id])).get(row.id) ?? [];
+    return avatarToDto(row, (await dmMap(db, [row.id])).get(row.id)!, timezone, links);
   }
 
   async function changed() {
@@ -64,7 +66,8 @@ export async function avatarRoutes(app: FastifyInstance) {
     const rows = await db.select().from(avatars).orderBy(asc(avatars.createdAt));
     const dms = await dmMap(db, rows.map((r) => r.id));
     const { timezone } = await loadSettings(db);
-    return rows.map((r) => avatarToDto(r, dms.get(r.id)!, timezone));
+    const links = await loadLinks(db);
+    return rows.map((r) => avatarToDto(r, dms.get(r.id)!, timezone, links.get(r.id) ?? []));
   });
 
   app.get('/avatars/:id', async (req) => dto(await load(parseBody(idParams, req.params).id)));
@@ -73,6 +76,7 @@ export async function avatarRoutes(app: FastifyInstance) {
     const input = parseBody(avatarInputSchema, req.body);
     if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona) ?? {};
+    if (input.links) await assertLinkTargets(db, input.links);
     // 建立 avatar 時一起建立它的一對一聊天
     const row = await db.transaction(async (tx) => {
       const [a] = await tx
@@ -92,6 +96,7 @@ export async function avatarRoutes(app: FastifyInstance) {
       return a!;
     });
     await getRelationship(db, row.id, 'user', input.initialStage ?? 'stranger');
+    if (input.links) await saveLinks(db, row.id, input.links);
     await changed();
     return reply.status(201).send(await dto(row));
   });
@@ -102,6 +107,7 @@ export async function avatarRoutes(app: FastifyInstance) {
     await load(id);
     if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona);
+    if (input.links) await assertLinkTargets(db, input.links);
     const [row] = await db
       .update(avatars)
       .set({
@@ -116,6 +122,7 @@ export async function avatarRoutes(app: FastifyInstance) {
       })
       .where(eq(avatars.id, id))
       .returning();
+    if (input.links !== undefined) await saveLinks(db, id, input.links);
     await changed();
     return dto(row!);
   });

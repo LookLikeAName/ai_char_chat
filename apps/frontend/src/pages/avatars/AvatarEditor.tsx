@@ -9,6 +9,7 @@ import {
   DEFAULT_AVATAR_PHOTO,
   type AvatarDto,
   type AvatarInput,
+  type AvatarLink,
   type AvatarPhoto,
   type ImageStyle,
   type InitialStage,
@@ -20,6 +21,7 @@ import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { PhotoSettingsCard } from '../../components/PhotoSettingsCard.tsx';
+import { RelatedAvatarsCard } from '../../components/RelatedAvatarsCard.tsx';
 import { ExportDialog } from '../../components/TransferDialogs.tsx';
 import { PersonaEditor, type PersonaState } from '../../components/persona/PersonaEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
@@ -49,6 +51,8 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
   const [exporting, setExporting] = useState(false);
   const [photo, setPhoto] = useState<AvatarPhoto>(avatar?.photo ?? DEFAULT_AVATAR_PHOTO);
   const [tokenLimit, setTokenLimit] = useState(avatar?.dailyTokenLimit ?? 0);
+  const [links, setLinks] = useState<AvatarLink[]>(avatar?.links ?? []);
+  const linksOk = links.every((l) => l.relation.trim());
 
   const empty = isPersonaEmpty(p.persona);
   const missing = empty ? [] : missingFields(p.persona);
@@ -59,6 +63,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
       !deepEqual(llm, avatar.llm) ||
       tokenLimit !== avatar.dailyTokenLimit ||
       !deepEqual(photo, avatar.photo) ||
+      !deepEqual(links, avatar.links) ||
       !deepEqual(p.persona, avatar.persona) ||
       !deepEqual([...p.locks].sort(), [...avatar.personaLocks].sort()));
 
@@ -83,7 +88,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
     onError: (err) => toast(errorText(err), 'error'),
   });
 
-  const canSave = !!p.name.trim() && missing.length === 0 && !save.isPending;
+  const canSave = !!p.name.trim() && missing.length === 0 && linksOk && !save.isPending;
 
   return (
     <form
@@ -99,6 +104,7 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
             personaLocks: p.locks,
             dailyTokenLimit: tokenLimit,
             photo,
+            links,
             ...(avatar ? {} : { initialStage }),
           });
         }
@@ -171,7 +177,12 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
         </>
       )}
 
-      {tab === 'persona' && <PersonaEditor value={p} onChange={setP} />}
+      {tab === 'persona' && (
+        <>
+          <RelatedAvatarsCard selfId={avatar?.id ?? null} selfName={p.name} value={links} onChange={setLinks} />
+          <PersonaEditor value={p} onChange={setP} references={links} />
+        </>
+      )}
 
       {tab === 'brain' && (
         <section className="card">
@@ -210,7 +221,9 @@ export function AvatarEditor({ avatar }: { avatar: AvatarDto | null }) {
           </button>
         )}
         <span className="spacer" />
-        {missing.length > 0 ? (
+        {!linksOk ? (
+          <span className="hint warn-text">相關的角色還有關係沒寫</span>
+        ) : missing.length > 0 ? (
           <span className="hint warn-text">
             人格設定還有 {missing.length} 個欄位沒填
             {tab !== 'persona' && (

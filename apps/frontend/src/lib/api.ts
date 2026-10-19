@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   AvatarDto,
+  AvatarLink,
   AvatarStateDto,
   InitialStage,
   AvatarInput,
@@ -124,7 +125,7 @@ export const api = {
     request<AvatarDto>('POST', `/api/avatars/${id}/image/generate`, { prompt }),
   generatePersona: (input: PersonaGenerateInput) =>
     request<PersonaGenerateResult>('POST', '/api/avatars/persona/generate', input),
-  checkPersona: (input: { name: string; bio: string; persona: unknown; locks: string[] }) =>
+  checkPersona: (input: { name: string; bio: string; persona: unknown; locks: string[]; references?: AvatarLink[] }) =>
     request<{ issues: PersonaIssue[] }>('POST', '/api/avatars/persona/check', input),
 
   profile: () => request<ProfileDto>('GET', '/api/profile'),

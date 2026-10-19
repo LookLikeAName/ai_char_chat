@@ -18,6 +18,7 @@ import {
   mentions,
   type AppSettings,
   type SpeakerCandidate,
+  type AvatarLink,
 } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
@@ -36,6 +37,7 @@ import { applyInteraction, getMood, getRelationship, setMood } from '../relation
 import { callWithBinding } from '../services/llmCall.ts';
 import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
+import { linkedAvatars, loadLinks } from '../services/avatarLinks.ts';
 import { avatarPhoto } from '../services/avatars.ts';
 import { photosRemaining, takePhoto } from '../services/photos.ts';
 import { loadSettings } from '../services/settings.ts';
@@ -730,7 +732,9 @@ export class ReplyEngine {
     const history = await this.loadHistory(ctx.conversationId);
     const profile = await loadProfile(db);
     const now = this.now();
-    const group = ctx.type === 'group' ? await this.groupInfo(ctx, situation, profile.preferences?.nickname) : null;
+    const links = (await loadLinks(db, [ctx.avatar.id])).get(ctx.avatar.id) ?? [];
+    const acquaintances = await linkedAvatars(db, links);
+    const group = ctx.type === 'group' ? await this.groupInfo(ctx, situation, profile.preferences?.nickname, links) : null;
     const embedder = await embedderFromSettings(db, this.deps.box, settings, this.deps.fetchFn).catch(() => null);
     const [relationship, mood, impression] = await Promise.all([
       getRelationship(db, ctx.avatar.id),
@@ -769,6 +773,13 @@ export class ReplyEngine {
       situation,
       lifeLog,
       group,
+      acquaintances: acquaintances.map((a) => ({
+        name: a.name,
+        relation: a.relation,
+        bio: a.bio,
+        occupation: a.persona.basic?.occupation,
+        traits: a.persona.personality?.traits,
+      })),
       settings,
       history,
       images,
@@ -807,7 +818,7 @@ export class ReplyEngine {
   }
 
   /** 群組的成員、與每個成員的關係 */
-  private async groupInfo(ctx: Ctx, situation: PromptSituation, nickname?: string): Promise<PromptGroup> {
+  private async groupInfo(ctx: Ctx, situation: PromptSituation, nickname?: string, links: AvatarLink[] = []): Promise<PromptGroup> {
     const db = this.deps.db;
     const [conv] = await db.select().from(conversations).where(eq(conversations.id, ctx.conversationId));
     const rows = await db
@@ -824,6 +835,7 @@ export class ReplyEngine {
         name: avatar.name,
         bio: avatar.bio,
         relationship: { stage: r.stage, affinity: r.affinity, trust: r.trust },
+        relation: links.find((l) => l.avatarId === avatar.id)?.relation,
       });
     }
     return {

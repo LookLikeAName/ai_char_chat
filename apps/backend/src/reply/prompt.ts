@@ -57,7 +57,7 @@ export interface PromptGroup {
   /** 自己的 avatar id */
   selfId: string;
   /** 其他成員（不含自己） */
-  members: { id: string; name: string; bio: string; relationship?: RelationshipState }[];
+  members: { id: string; name: string; bio: string; relationship?: RelationshipState; relation?: string }[];
   /** 玩家在群組裡的名字 */
   userName: string;
   /** 自己的口風（0 大嘴巴～100 守口如瓶） */
@@ -66,6 +66,15 @@ export interface PromptGroup {
   mentioned?: boolean;
   /** 這一輪：在你之前已經回覆的成員 */
   before?: string[];
+}
+
+/** 相關的角色（玩家設定的，例如同事）：avatar 生活裡認識的人 */
+export interface PromptAcquaintance {
+  name: string;
+  relation: string;
+  bio: string;
+  occupation?: string;
+  traits?: string[];
 }
 
 /** 玩家的 profile；還沒填偏好問卷時為 null */
@@ -105,6 +114,7 @@ export interface ReplyPromptInput {
   /** 今天的生活日誌（全部；prompt 只放已經發生的） */
   lifeLog?: LifeLogEvent[] | null;
   group?: PromptGroup | null;
+  acquaintances?: PromptAcquaintance[];
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
@@ -148,7 +158,7 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history, user, state, situation, lifeLog, group, photos } = input;
+  const { avatar, settings, now, history, user, state, situation, lifeLog, group, photos, acquaintances } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
@@ -178,7 +188,7 @@ ${avatar.bio || '（沒有額外描述）'}
 ${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
 ${relationship}
-${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}
+${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}${acquaintanceSection(acquaintances, group)}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
@@ -257,7 +267,9 @@ function groupSection(g: PromptGroup): string {
   const lines = [`## 群組成員`];
   for (const m of g.members) {
     const r = m.relationship;
-    lines.push(`- ${m.name}：${m.bio || '（沒有簡介）'}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`);
+    lines.push(
+      `- ${m.name}：${m.bio || '（沒有簡介）'}${m.relation ? `\n  你們是：${m.relation}` : ''}${r ? `（你們的關係：${STAGE_LABELS[r.stage]}，好感 ${r.affinity}）` : ''}`,
+    );
   }
   lines.push(
     '',
@@ -272,6 +284,21 @@ function groupSection(g: PromptGroup): string {
   if (g.mentioned) lines.push('', '這一輪對方點名了你，一定要回應。');
   if (g.before?.length) lines.push('', `這一輪 ${g.before.join('、')} 已經先回了，看得到他們說了什麼。`);
   return lines.join('\n');
+}
+
+/** 群組裡已經列在成員的人不重複 */
+function acquaintanceSection(list: PromptAcquaintance[] | undefined, group: PromptGroup | null | undefined): string {
+  const others = (list ?? []).filter((a) => !group?.members.some((m) => m.name === a.name));
+  if (!others.length) return '';
+  const lines = others.map((a) => {
+    const about = [a.occupation, a.traits?.length ? a.traits.join('、') : ''].filter(Boolean).join('；');
+    return `- ${a.name}：${a.relation}${a.bio ? `\n  ${a.bio}` : ''}${about ? `（${about}）` : ''}`;
+  });
+  return `
+## 你生活裡認識的人
+${lines.join('\n')}
+他們是你真實生活的一部分，聊到相關的事時可以自然地提起（例如工作上的事、一起做過的事）。對方可能也認識他們、私下和他們聊天，但你不知道他們聊了什麼；不要捏造他們跟對方說過的話。
+`;
 }
 
 const FAMILIAR: Stage[] = ['friend', 'close', 'crush', 'lover'];

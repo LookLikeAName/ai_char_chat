@@ -5,8 +5,10 @@ import {
   sanitizeDraft,
   type AppSettings,
   type PersonaIssue,
+  type AvatarLink,
   type PersonaPath,
 } from '@acc/shared';
+import { referenceSection } from '../services/avatarLinks.ts';
 import type { CallContext } from '../services/llmCall.ts';
 import { flatten } from './describe.ts';
 import { callUtility, parseJsonObject } from './utility.ts';
@@ -17,10 +19,11 @@ const MAX_ISSUES = 6;
 export async function checkPersona(
   ctx: CallContext,
   settings: AppSettings,
-  input: { name: string; bio: string; persona: Record<string, unknown>; locks: string[] },
+  input: { name: string; bio: string; persona: Record<string, unknown>; locks: string[]; references?: AvatarLink[] },
 ): Promise<PersonaIssue[]> {
   const { draft } = sanitizeDraft(input.persona);
   const locks = new Set(input.locks);
+  const references = await referenceSection(ctx.db, input.references ?? []);
   const content = `# 角色：${input.name || '（未命名）'}
 簡介：${input.bio || '（沒有）'}
 
@@ -29,9 +32,11 @@ ${JSON.stringify(flatten(draft as never, PERSONA_PATHS), null, 1)}
 
 # 鎖定的欄位（不能修改）
 ${[...locks].join('、') || '（沒有）'}
-
+${references ? `\n${references}\n` : ''}
 # 任務
-找出彼此矛盾、或明顯不合理到會破壞真實感的地方，例如：極度內向卻是業務、作息和職業衝突、年齡和經歷對不上、說話範例不符合語氣或 emoji 習慣、價值排序和人生目標矛盾。
+找出彼此矛盾、或明顯不合理到會破壞真實感的地方，例如：極度內向卻是業務、作息和職業衝突、年齡和經歷對不上、說話範例不符合語氣或 emoji 習慣、價值排序和人生目標矛盾。${
+    references ? '\n也要檢查和相關的角色有沒有對不上的地方（公司、地點、認識的經過、年齡與上下關係），或個性幾乎一模一樣。只能修改這個角色的欄位。' : ''
+  }
 人本來就有一些矛盾，有張力但說得通的不算問題；沒問題就不要硬找。
 
 # 輸出格式

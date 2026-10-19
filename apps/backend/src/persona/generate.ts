@@ -14,6 +14,7 @@ import {
   type personaGenerateSchema,
 } from '@acc/shared';
 import type { z } from 'zod';
+import { referenceSection } from '../services/avatarLinks.ts';
 import type { CallContext } from '../services/llmCall.ts';
 import { describeField, flatten } from './describe.ts';
 import { callUtility, parseJsonObject } from './utility.ts';
@@ -27,6 +28,11 @@ const RULES = `# 要求
 - 內容用繁體中文（台灣用語），除非角色的背景明顯是其他語言。
 - 說話範例要真的像他會傳的訊息，符合語氣、用字、標點與 emoji 習慣。
 - 作息用 24 小時制，平日與假日都要涵蓋一整天。`;
+
+const REFERENCE_RULES = `# 和相關的角色
+- 共同的事實要對得上：公司或學校的名字、地點、怎麼認識的、認識多久、誰是誰的上司或學長姐。
+- 個性、說話方式、興趣要和他們有明顯的差別，不要複製；可以有互補或摩擦。
+- 適合的話，把他們寫進家人、人生經歷、人際關係裡（用名字稱呼）。`;
 
 type Input = z.infer<typeof personaGenerateSchema>;
 
@@ -55,6 +61,7 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
   let pending = targets;
   let errors: Record<PersonaPath, string> = {};
   let lastOutput = '';
+  const references = await referenceSection(ctx.db, input.references ?? []);
 
   // 第一次產生全部；有不合法的值再針對那幾個欄位重試一次
   for (let attempt = 0; attempt < 2 && (pending.length || (attempt === 0 && (wantName || wantBio))); attempt++) {
@@ -65,6 +72,7 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
       `名字：${name || '（還沒決定，請一併取一個名字）'}`,
       `簡介：${bio || '（還沒寫，請一併寫一句簡介）'}`,
       input.seed ? `玩家的描述：${input.seed}` : '',
+      references ? `\n${references}` : '',
       '',
       '# 已經確定的設定（不能改，新內容必須和這些一致）',
       known.length ? JSON.stringify(flatten(persona as never, known), null, 1) : '（還沒有）',
@@ -81,6 +89,7 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
         : '',
       '',
       RULES,
+      references ? `\n${REFERENCE_RULES}` : '',
       '',
       `# 輸出格式
 {${wantName && !name ? '"name": "名字", ' : ''}${wantBio && !bio ? '"bio": "一句話簡介", ' : ''}"persona": {"欄位路徑": 值, …}}

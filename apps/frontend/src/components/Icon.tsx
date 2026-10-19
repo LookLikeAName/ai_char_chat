@@ -9,6 +9,7 @@ const PATHS = {
   send: 'M4 12l16-8-6 16-2-7z',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zm0-10v6m0-9v.01',
   back: 'M15 5l-7 7 7 7',
+  close: 'M6 6l12 12M18 6L6 18',
   trash: 'M5 7h14M10 7V4h4v3m-7 0l1 13h8l1-13',
   image: 'M4 5h16v14H4zm0 11l5-5 4 4 3-3 4 4M15 9h.01',
   pulse: 'M3 12h4l3-7 4 14 3-7h4',

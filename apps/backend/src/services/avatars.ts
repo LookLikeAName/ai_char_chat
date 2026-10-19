@@ -2,6 +2,7 @@ import {
   availabilityAt,
   avatarPhotoSchema,
   DEFAULT_AVATAR_PHOTO,
+  type AvatarLink,
   type AvatarPhoto,
   fieldMeta,
   isPersonaEmpty,
@@ -27,6 +28,7 @@ export function avatarToDto(
   row: typeof avatars.$inferSelect,
   dmConversationId: string,
   timezone: string,
+  links: AvatarLink[] = [],
   now = new Date(),
 ): AvatarDto {
   const a = availabilityAt(row.persona, now, timezone);
@@ -41,6 +43,7 @@ export function avatarToDto(
     personaComplete: !isPersonaEmpty(row.persona) && missingFields(row.persona).length === 0,
     dailyTokenLimit: row.dailyTokenLimit,
     photo: avatarPhoto(row),
+    links,
     photoReferenceUrl: mediaUrl(row.photoReferencePath),
     availability: { status: a.status, activity: a.activity, until: a.until?.toISOString() ?? null },
     dmConversationId,

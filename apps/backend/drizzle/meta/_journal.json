@@ -99,6 +99,13 @@
       "when": 1792415338381,
       "tag": "0013_profile_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792420613321,
+      "tag": "0014_avatar_links",
+      "breakpoints": true
     }
   ]
 }
