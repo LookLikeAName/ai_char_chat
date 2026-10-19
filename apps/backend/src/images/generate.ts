@@ -12,12 +12,25 @@ export interface GeneratedImage {
 
 const TIMEOUT_MS = 120_000;
 
+export interface ImageOptions {
+  /** 參考圖（例如 avatar 的頭像，讓照片裡的人長得一樣）；目前只有 Gemini 的圖片模型用得到 */
+  reference?: { mime: string; data: Buffer } | null;
+  /** 直式照片用 3:4；頭像用 1:1 */
+  aspect?: '1:1' | '3:4';
+}
+
 function modelPath(model: string): string {
   return model.startsWith('models/') ? model : `models/${model}`;
 }
 
-export async function generateImage(llm: ResolvedLlm, prompt: string, fetchFn: FetchFn = fetch): Promise<GeneratedImage> {
+export async function generateImage(
+  llm: ResolvedLlm,
+  prompt: string,
+  fetchFn: FetchFn = fetch,
+  opts: ImageOptions = {},
+): Promise<GeneratedImage> {
   const signal = AbortSignal.timeout(TIMEOUT_MS);
+  const aspect = opts.aspect ?? '1:1';
   const base = trimSlash(llm.baseUrl);
 
   if (llm.provider === 'google') {
@@ -26,7 +39,7 @@ export async function generateImage(llm: ResolvedLlm, prompt: string, fetchFn: F
       const res = await requestJson<{ predictions?: { bytesBase64Encoded?: string; mimeType?: string }[] }>(
         fetchFn,
         `${base}/${modelPath(llm.model)}:predict`,
-        { headers, body: { instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: '1:1' } }, signal },
+        { headers, body: { instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: aspect } }, signal },
       );
       const p = res.predictions?.[0];
       if (!p?.bytesBase64Encoded) throw new LlmError('Imagen 沒有回傳圖片（可能被安全過濾擋下）');
@@ -38,8 +51,16 @@ export async function generateImage(llm: ResolvedLlm, prompt: string, fetchFn: F
     }>(fetchFn, `${base}/${modelPath(llm.model)}:generateContent`, {
       headers,
       body: {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '1:1' } },
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              ...(opts.reference ? [{ inlineData: { mimeType: opts.reference.mime, data: opts.reference.data.toString('base64') } }] : []),
+              { text: prompt },
+            ],
+          },
+        ],
+        generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspect } },
       },
       signal,
     });
@@ -58,7 +79,7 @@ export async function generateImage(llm: ResolvedLlm, prompt: string, fetchFn: F
         model: llm.model,
         prompt,
         n: 1,
-        size: '1024x1024',
+        size: aspect === '1:1' ? '1024x1024' : /^dall-e-3/.test(llm.model) ? '1024x1792' : /^gpt-image/.test(llm.model) ? '1024x1536' : '1024x1024',
         // dall-e 預設回網址；gpt-image 系列只回 base64
         ...(/^dall-e/.test(llm.model) ? { response_format: 'b64_json' } : {}),
       },

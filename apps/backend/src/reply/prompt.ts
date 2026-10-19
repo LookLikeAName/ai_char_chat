@@ -108,6 +108,8 @@ export interface ReplyPromptInput {
   /** 由舊到新 */
   history: HistoryMessage[];
   images?: HistoryImages;
+  /** 可以傳照片（有設定圖片模型）；remaining 是今天還能傳幾張 */
+  photos?: { remaining: number } | null;
   now: Date;
 }
 
@@ -145,7 +147,7 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history, user, state, situation, lifeLog, group } = input;
+  const { avatar, settings, now, history, user, state, situation, lifeLog, group, photos } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
@@ -180,7 +182,8 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
 - 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
-- 不要捏造對方沒說過的事；不知道就問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
+- 不要捏造對方沒說過的事；不知道就問。
+- 對方傳來的圖片會附在訊息裡，或用［］寫出內容；像真人一樣對它有反應。看不到內容就直接問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
 - 除非你的設定另有指定，用繁體中文（台灣用語）。${group ? GROUP_RULES : ''}
 - ${content}
 
@@ -195,7 +198,16 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''
 ${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
 - relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
       : ''
-  }`;
+  }${photos ? photoSection(photos.remaining, settings.adultContent) : ''}`;
+}
+
+/** 可以傳照片時才出現：什麼時候傳、怎麼描述 */
+function photoSection(remaining: number, adult: boolean): string {
+  if (remaining <= 0) return '\n- 今天已經傳了很多照片，這次不要再傳（不要填 photo）。';
+  return `
+- photo：平常省略。想用手機傳一張照片時才加上 "photo": "照片的內容"，例如對方想看、你想分享正在吃的東西、看到的風景、或拍一張自拍。不要每次都傳，今天最多還能傳 ${remaining} 張。
+  照片會照你的描述拍出來，所以要具體：拍了什麼、在哪裡、角度與光線；有你自己入鏡（自拍）時寫出表情、動作、穿著。描述用第三人稱寫畫面，不要寫對話。${adult ? '' : '照片內容要適合一般場合。'}
+  照片和 messages 會一起傳出；只傳照片的話 messages 可以是 []。`;
 }
 
 function todaySection(log: LifeLogEvent[] | null | undefined, hhmm: string): string {

@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { IMAGE_STYLES, type ImageStyle } from './avatar.ts';
 import { llmBindingSchema } from './llm.ts';
+
+const imageStyles = Object.keys(IMAGE_STYLES) as [ImageStyle, ...ImageStyle[]];
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '格式為 HH:MM');
 
@@ -27,6 +30,10 @@ export const appSettingsSchema = z.object({
     .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })
     .nullable()
     .default(null),
+  /** avatar 傳照片（用頭像生成的圖片模型）：每個 avatar 每天最多幾張、照片的風格 */
+  photos: z
+    .object({ enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(50), style: z.enum(imageStyles) })
+    .default({ enabled: true, dailyLimit: 5, style: 'realistic' }),
   /** 記憶用的嵌入模型（Google 或 OpenAI 相容），向量固定 768 維 */
   embedding: z
     .object({ profileId: z.uuid(), model: z.string().trim().min(1).max(200) })

@@ -12,12 +12,15 @@ export interface ReplyOutput {
   event: { type: RelationshipEventType; note: string } | null;
   /** 群組：對其他成員的好感變化（名字 → 變化量） */
   othersAffinity: Record<string, number>;
+  /** 想傳的照片：內容描述（會拿去生成圖片）；不傳為 null */
+  photo: string | null;
   /** 產生這個輸出的 LLM 呼叫（監控用） */
   traceId?: string | null;
 }
 
 const MAX_MESSAGES = 6;
 const MAX_MESSAGE_CHARS = 1500;
+const MAX_PHOTO_CHARS = 500;
 
 const outputSchema = z.object({
   inner_thought: z.string().optional(),
@@ -28,6 +31,7 @@ const outputSchema = z.object({
   affinity_delta: z.unknown().optional(),
   trust_delta: z.unknown().optional(),
   relationship_event: z.unknown().optional(),
+  photo: z.unknown().optional(),
   others_affinity: z.unknown().optional(),
 });
 
@@ -80,7 +84,9 @@ export function parseReplyOutput(text: string, opts: { allowEmpty?: boolean } = 
   if (!parsed.success) return null;
   const raw = parsed.data.messages ?? parsed.data.message;
   const messages = clean(typeof raw === 'string' ? [raw] : (raw ?? []));
-  if (!messages.length && !(opts.allowEmpty && Array.isArray(raw))) return null;
+  const photo = typeof parsed.data.photo === 'string' && parsed.data.photo.trim() ? parsed.data.photo.trim().slice(0, MAX_PHOTO_CHARS) : null;
+  // 只傳照片、不說話也可以
+  if (!messages.length && !photo && !(opts.allowEmpty && Array.isArray(raw))) return null;
   const mood = moodSchema.safeParse(parsed.data.mood);
   return {
     innerThought: parsed.data.inner_thought?.trim() ?? '',
@@ -90,6 +96,7 @@ export function parseReplyOutput(text: string, opts: { allowEmpty?: boolean } = 
     trustDelta: delta(parsed.data.trust_delta),
     event: parseEvent(parsed.data.relationship_event),
     othersAffinity: othersAffinity(parsed.data.others_affinity),
+    photo,
   };
 }
 
@@ -101,5 +108,5 @@ export function plainTextFallback(text: string): ReplyOutput | null {
   const t = text.trim();
   if (!t || /[{}[\]]/.test(t.slice(0, 2)) || /"messages"\s*:/.test(t)) return null;
   const messages = clean(t.split(/\n\s*\n/));
-  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null, othersAffinity: {} } : null;
+  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null, othersAffinity: {}, photo: null } : null;
 }

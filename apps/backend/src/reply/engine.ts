@@ -36,6 +36,7 @@ import { applyInteraction, getMood, getRelationship, setMood } from '../relation
 import { callWithBinding } from '../services/llmCall.ts';
 import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
+import { photosRemaining, takePhoto } from '../services/photos.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
 import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptGroup, type PromptSituation } from './prompt.ts';
@@ -211,7 +212,7 @@ export class ReplyEngine {
 
       const startedAt = this.now();
       const output = await this.generate(ctx, { mode: 'proactive' });
-      if (!output.messages.length) {
+      if (!output.messages.length && !output.photo) {
         await logEvent({
           category: 'proactive',
           type: 'proactive.silent',
@@ -241,6 +242,9 @@ export class ReplyEngine {
         sent++;
         await setTyping(ctx.avatar.id, false);
         if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
+      }
+      if (output.photo && !(await this.hasNewerUserMessage(conversationId, latestUser ?? startedAt))) {
+        if (await this.sendPhoto(ctx, output, { proactive: true })) sent++;
       }
       if (!sent) return 'skipped';
       await logEvent({
@@ -432,7 +436,7 @@ export class ReplyEngine {
           }
           continue;
         }
-        if (!output.messages.length) {
+        if (!output.messages.length && !output.photo) {
           await setTyping(cand.id, false);
           await logEvent({
             category: 'group',
@@ -468,6 +472,7 @@ export class ReplyEngine {
           if (i < toSend.length - 1) await this.sleep(betweenMessagesMs(this.random));
         }
         await setTyping(cand.id, false);
+        if (!interrupted && output.photo && (await this.sendPhoto(ctx, output))) sent++;
         if (!sent) break;
         spoken.push(cand.name);
         await logEvent({
@@ -528,7 +533,7 @@ export class ReplyEngine {
         if (latestUser && (!conv.handledUpTo || latestUser > conv.handledUpTo)) return 'skipped';
         if (await this.overQuota(conversationId, ctx.avatar, false)) return 'skipped';
         const output = await this.generate(ctx, { mode: 'proactive' });
-        if (!output.messages.length) return 'skipped';
+        if (!output.messages.length && !output.photo) return 'skipped';
         let sent = 0;
         for (const [i, text] of output.messages.slice(0, 3).entries()) {
           await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: true });
@@ -547,6 +552,7 @@ export class ReplyEngine {
           await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: false });
           sent++;
         }
+        if (output.photo && (await this.sendPhoto(ctx, output, { proactive: true }))) sent++;
         await logEvent({
           category: 'proactive',
           type: 'proactive.group',
@@ -613,7 +619,56 @@ export class ReplyEngine {
       await setTyping(avatarId, false);
       if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
     }
+    if (output.photo) await this.sendPhoto(ctx, output);
+    else if (!output.messages.length) await setTyping(avatarId, false);
     return { kind: 'sent', output };
+  }
+
+  /**
+   * avatar 想傳照片：生成後當成一則圖片訊息送出（生成期間顯示「輸入中」）。
+   * 不能傳（沒設定圖片模型、今天的張數用完）就略過；生成失敗留一則提示。
+   */
+  private async sendPhoto(ctx: Ctx, output: ReplyOutput, opts: { proactive?: boolean } = {}): Promise<boolean> {
+    const { db, events } = this.deps;
+    const settings = await loadSettings(db);
+    const remaining = await photosRemaining(db, settings, ctx.avatar.id, { mediaDir: this.deps.mediaDir, now: this.now() });
+    if (!remaining) {
+      await logEvent({
+        category: 'reply',
+        type: 'photo.skipped',
+        avatarId: ctx.avatar.id,
+        message: `${ctx.avatar.name} 想傳照片，但${remaining === 0 ? '今天的張數用完了' : '目前不能傳照片（沒有設定圖片模型、關掉了或超過用量上限）'}`,
+        data: { description: output.photo },
+      });
+      return false;
+    }
+    const typing = (on: boolean) => events.publish({ type: 'typing', conversationId: ctx.conversationId, avatarId: ctx.avatar.id, typing: on });
+    await typing(true);
+    try {
+      const image = await takePhoto({ ...this.deps, mediaDir: this.deps.mediaDir! }, settings, ctx.avatar, output.photo!);
+      await postMessage(db, events, {
+        conversationId: ctx.conversationId,
+        senderType: 'avatar',
+        senderAvatarId: ctx.avatar.id,
+        content: '',
+        meta: { image, ...(output.traceId ? { traceId: output.traceId } : {}), ...(opts.proactive ? { proactive: true } : {}) },
+      });
+      await logEvent({
+        category: 'reply',
+        type: 'photo.sent',
+        avatarId: ctx.avatar.id,
+        traceId: output.traceId,
+        message: `${ctx.avatar.name} 傳了一張照片：${output.photo}`,
+      });
+      return true;
+    } catch (err) {
+      const message = (err as Error).message;
+      await logEvent({ category: 'reply', type: 'photo.failed', level: 'warn', avatarId: ctx.avatar.id, message: `${ctx.avatar.name} 的照片生成失敗：${message}` });
+      await this.noticeOnce(ctx.conversationId, `${ctx.avatar.name} 的照片沒傳出去（${message.slice(0, 120)}）`);
+      return false;
+    } finally {
+      await typing(false);
+    }
   }
 
   /** 回覆送出後更新心情與關係 */
@@ -698,6 +753,7 @@ export class ReplyEngine {
     const lifeLog = await getLifeLog(db, ctx.avatar.id, localClock(now, settings.timezone).date);
     const canSee = await profileVision(db, ctx.avatar.llm?.profileId);
     const images = await prepareImages(this.deps, settings, history, { selfId: ctx.avatar.id, canSee, preview: opts.preview });
+    const photosLeft = await photosRemaining(db, settings, ctx.avatar.id, { mediaDir: this.deps.mediaDir, now });
     const { system, messages: built } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       user: profile.preferences
@@ -715,6 +771,7 @@ export class ReplyEngine {
       settings,
       history,
       images,
+      photos: photosLeft === null ? null : { remaining: photosLeft },
       now,
     });
     // 最後一則不是別人說的話時（主動發話、群組裡自己剛說過），補一個提示回合（Anthropic、Gemini 要求最後是 user）
@@ -741,7 +798,7 @@ export class ReplyEngine {
         embedder: embedder?.model ?? null,
         lifeLog: lifeLog?.length ?? 0,
         historyMessages: history.length,
-        images: { canSee, attached: images.size },
+        images: { canSee, attached: images.size, photosLeft },
         disclosure: profile.preferences ? relationship.stage : 'no-profile',
         group: group ? { title: group.title, members: group.members.map((m) => m.name), mentioned: group.mentioned } : null,
       },

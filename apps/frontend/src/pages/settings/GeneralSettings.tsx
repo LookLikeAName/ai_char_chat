@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } from '@acc/shared';
+import { IMAGE_STYLE_LABELS, PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } from '@acc/shared';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -206,8 +206,10 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
       </section>
 
       <section className="card">
-        <h2>頭像生成</h2>
-        <p className="hint">用哪個 LLM 設定檔的 API key 與端點，以及哪個圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。</p>
+        <h2>頭像與照片生成</h2>
+        <p className="hint">
+          用哪個 LLM 設定檔的 API key 與端點，以及哪個圖片模型。支援 Google（Gemini 圖片模型、Imagen）與 OpenAI（相容）。AI 生成頭像、avatar 傳照片都用這裡的設定。
+        </p>
         <label className="field">
           <span className="field-label">設定檔</span>
           <select
@@ -241,6 +243,48 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
             <span className="hint">模型名稱以 imagen 開頭的走 Imagen API，其他 Google 模型走 Gemini 的圖片輸出。</span>
           </label>
         )}
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.photos.enabled}
+            onChange={(e) => patch({ photos: { ...s.photos, enabled: e.target.checked } })}
+          />
+          <span>avatar 可以傳照片給你</span>
+        </label>
+        {s.photos.enabled && (
+          <div className="row">
+            <label className="field">
+              <span className="field-label">每個 avatar 每天最多幾張</span>
+              <input
+                type="number"
+                className="narrow-input"
+                min={0}
+                max={50}
+                value={s.photos.dailyLimit}
+                onChange={(e) =>
+                  patch({ photos: { ...s.photos, dailyLimit: Math.max(0, Math.min(50, Math.round(Number(e.target.value) || 0))) } })
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">照片風格</span>
+              <select
+                value={s.photos.style}
+                onChange={(e) => patch({ photos: { ...s.photos, style: e.target.value as AppSettings['photos']['style'] } })}
+              >
+                {Object.entries(IMAGE_STYLE_LABELS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        <p className="hint">
+          avatar 會在自然的時候傳照片（你想看、分享吃的東西或風景、自拍）。用 Gemini 的圖片模型時，會拿頭像當參考，照片裡的人比較像它；每張照片都要付圖片模型的費用。
+          {!s.imageGen && s.photos.enabled && ' 要先選好上面的圖片模型才會傳。'}
+        </p>
       </section>
 
       <section className="card">
