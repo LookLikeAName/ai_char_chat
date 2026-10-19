@@ -27,6 +27,8 @@ export interface ScoredCandidate extends SpeakerCandidate {
 export const GROUP_MESSAGE_BUDGET = 4;
 const MAX_SPEAKERS = 3;
 const THRESHOLD = 0.32;
+/** 玩家在問大家時，每個人都比較想回 */
+const EVERYONE_BONUS = 0.1;
 const STATUS_FACTOR: Record<AvailabilityStatus, number> = { free: 1, busy: 0.4, sleep: 0 };
 
 /** 玩家在問問題、或對大家說話：至少要有一個人回 */
@@ -43,6 +45,7 @@ export function mentions(text: string, name: string): boolean {
 
 export function chooseSpeakers(
   candidates: SpeakerCandidate[],
+  /** forceOne：玩家在問大家，至少一個人回、而且每個人都比較會回 */
   opts: { random: () => number; forceOne: boolean; maxSpeakers?: number },
 ): ScoredCandidate[] {
   const max = Math.min(opts.maxSpeakers ?? MAX_SPEAKERS, MAX_SPEAKERS);
@@ -54,7 +57,8 @@ export function chooseSpeakers(
       0.25 * (c.extraversion / 100) +
       0.25 * Math.max(0, Math.min(1, (c.affinity + 20) / 100)) +
       0.15 * opts.random() -
-      0.08 * c.recentMessages;
+      0.08 * c.recentMessages +
+      (opts.forceOne ? EVERYONE_BONUS : 0);
     return { ...c, score: Math.max(0, base * STATUS_FACTOR[c.status]), chosen: false, why: '' };
   });
 

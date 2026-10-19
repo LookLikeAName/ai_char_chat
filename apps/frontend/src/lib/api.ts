@@ -24,6 +24,7 @@ import type {
   ProfileDto,
   ProviderType,
   InstrumentId,
+  GroupInput,
 } from '@acc/shared';
 
 export class ApiError extends Error {
@@ -125,8 +126,8 @@ export const api = {
       request<{ ok: true }>('POST', `/api/debug/conversations/${conversationId}/extract-now`),
     run: (task: 'proactive-tick' | 'maintenance') => request<{ ok: true }>('POST', `/api/debug/run/${task}`),
     usage: (hours: number) => request<UsageRowDto[]>('GET', `/api/debug/usage?hours=${hours}`),
-    preview: (conversationId: string, mode: 'reply' | 'proactive') =>
-      request<PromptPreviewDto>('GET', `/api/debug/preview/${conversationId}?mode=${mode}`),
+    preview: (conversationId: string, mode: 'reply' | 'proactive', avatarId?: string) =>
+      request<PromptPreviewDto>('GET', `/api/debug/preview/${conversationId}${query({ mode, avatarId })}`),
     retrieve: (avatarId: string, q: string) =>
       request<{ embedder: string | null; rows: RetrievalRowDto[] }>('POST', `/api/debug/avatars/${avatarId}/retrieve`, {
         query: q,
@@ -140,6 +141,10 @@ export const api = {
     request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content }),
   markRead: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/read`),
   retryReply: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/retry`),
+  createGroup: (input: GroupInput) => request<{ id: string }>('POST', '/api/conversations', input),
+  updateGroup: (id: string, input: GroupInput) => request<{ ok: true }>('PUT', `/api/conversations/${id}`, input),
+  deleteGroup: (id: string) => request<void>('DELETE', `/api/conversations/${id}`),
+  typing: (conversationId: string) => request<void>('POST', `/api/conversations/${conversationId}/typing`),
 };
 
 export const qk = {

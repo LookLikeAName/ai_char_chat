@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { PROVIDER_LABELS, resolveParams, STATUS_LABELS, type AvatarDto, type ConversationDto, type MessageDto } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { AvatarStatePanel } from '../../components/AvatarStatePanel.tsx';
+import { GroupDialog } from '../../components/GroupDialog.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { clockTime, dayLabel, sameDay, shortTime } from '../../lib/format.ts';
@@ -17,14 +18,29 @@ export function ChatsPage() {
   // 狀態（在線／忙碌／睡覺）會隨時間改變，每分鐘更新一次
   const { data: avatars = [] } = useQuery({ queryKey: qk.avatars, queryFn: api.avatars, refetchInterval: 60_000 });
   const current = conversations.find((c) => c.id === conversationId) ?? null;
+  // 資訊面板按「@」時插入到輸入框；n 讓同一個名字可以連按
+  const [mention, setMention] = useState<{ name: string; n: number } | null>(null);
 
   return (
     <div className={`chats${conversationId ? ' has-selection' : ''}${infoOpen && current ? ' info-open' : ''}`}>
       <ChatList conversations={conversations} avatars={avatars} loading={isLoading} selectedId={conversationId} />
       {current ? (
         <>
-          <ChatView key={current.id} conversation={current} avatars={avatars} onToggleInfo={() => setInfoOpen((v) => !v)} />
-          {infoOpen && <InfoPanel conversation={current} avatars={avatars} onClose={() => setInfoOpen(false)} />}
+          <ChatView
+            key={current.id}
+            conversation={current}
+            avatars={avatars}
+            mention={mention}
+            onToggleInfo={() => setInfoOpen((v) => !v)}
+          />
+          {infoOpen && (
+            <InfoPanel
+              conversation={current}
+              avatars={avatars}
+              onMention={(name) => setMention((m) => ({ name, n: (m?.n ?? 0) + 1 }))}
+              onClose={() => setInfoOpen(false)}
+            />
+          )}
         </>
       ) : (
         <div className="chat-empty">
@@ -53,6 +69,7 @@ function ChatList({
   selectedId?: string;
 }) {
   const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
   const filtered = conversations.filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase()));
   const dms = filtered.filter((c) => c.type === 'dm');
   const groups = filtered.filter((c) => c.type === 'group');
@@ -75,8 +92,20 @@ function ChatList({
       <div className="chat-list-scroll">
         {loading && <p className="hint pad">載入中…</p>}
         <Section title="個人聊天" items={dms} avatars={avatars} selectedId={selectedId} />
-        <Section title="群組" items={groups} avatars={avatars} selectedId={selectedId} empty="群組功能在第 7 階段加入" />
+        <Section
+          title="群組"
+          items={groups}
+          avatars={avatars}
+          selectedId={selectedId}
+          empty={avatars.length >= 2 ? '按 + 建立群組' : '至少要有 2 個 avatar 才能建立群組'}
+          action={
+            <button className="icon-btn icon-btn-small" onClick={() => setCreating(true)} title="建立群組" aria-label="建立群組">
+              <Icon name="plus" size={16} />
+            </button>
+          }
+        />
       </div>
+      {creating && <GroupDialog onClose={() => setCreating(false)} />}
     </aside>
   );
 }
@@ -87,22 +116,28 @@ function Section({
   avatars,
   selectedId,
   empty,
+  action,
 }: {
   title: string;
   items: ConversationDto[];
   avatars: AvatarDto[];
   selectedId?: string;
   empty?: string;
+  action?: ReactNode;
 }) {
   return (
     <section>
-      <h2 className="list-section">{title}</h2>
+      <h2 className="list-section">
+        {title}
+        {action}
+      </h2>
       {items.length === 0 && empty && <p className="hint pad">{empty}</p>}
       {items.map((c) => (
         <ChatItem
           key={c.id}
           c={c}
           avatar={c.type === 'dm' ? avatars.find((a) => a.id === c.memberAvatarIds[0]) : undefined}
+          avatars={avatars}
           active={c.id === selectedId}
         />
       ))}
@@ -117,16 +152,65 @@ function StatusDot({ avatar }: { avatar?: AvatarDto }) {
   return <span className={`status-badge status-${status}`} title={label} aria-label={label} role="img" />;
 }
 
-function ChatItem({ c, avatar, active }: { c: ConversationDto; avatar?: AvatarDto; active: boolean }) {
-  const typing = useTyping(c.id).length > 0;
+function typingNames(ids: string[], avatars: AvatarDto[]): string {
+  const names = ids.map((id) => avatars.find((a) => a.id === id)?.name ?? '?');
+  return names.length > 2 ? `${names.slice(0, 2).join('、')} 等 ${names.length} 人` : names.join('、');
+}
+
+/** 群組頭像：前兩位成員疊在一起 */
+function GroupImage({
+  memberIds,
+  avatars,
+  title,
+  size,
+}: {
+  memberIds: string[];
+  avatars: AvatarDto[];
+  title: string;
+  size: number;
+}) {
+  const members = memberIds.map((id) => avatars.find((a) => a.id === id)).filter((a): a is AvatarDto => !!a);
+  if (members.length < 2) return <AvatarImage name={title} src={null} size={size} />;
+  const small = Math.round(size * 0.68);
+  return (
+    <span className="group-image" style={{ width: size, height: size }} aria-hidden>
+      <AvatarImage name={members[0]!.name} src={members[0]!.imageUrl} size={small} />
+      <AvatarImage name={members[1]!.name} src={members[1]!.imageUrl} size={small} />
+    </span>
+  );
+}
+
+function ChatItem({
+  c,
+  avatar,
+  avatars,
+  active,
+}: {
+  c: ConversationDto;
+  avatar?: AvatarDto;
+  avatars: AvatarDto[];
+  active: boolean;
+}) {
+  const typingIds = useTyping(c.id);
+  const typing = typingIds.length > 0;
   const unread = active ? 0 : c.unreadCount;
-  const preview = c.lastMessage
-    ? `${c.lastMessage.senderType === 'user' ? '你：' : ''}${c.lastMessage.content}`
-    : '還沒有訊息';
+  const last = c.lastMessage;
+  const senderName =
+    last?.senderType === 'user'
+      ? '你'
+      : c.type === 'group' && last?.senderAvatarId
+        ? avatars.find((a) => a.id === last.senderAvatarId)?.name
+        : undefined;
+  const preview = last ? `${senderName ? `${senderName}：` : ''}${last.content}` : '還沒有訊息';
+  const typingText = c.type === 'group' ? `${typingNames(typingIds, avatars)} 輸入中…` : '輸入中…';
   return (
     <Link to={`/chats/${c.id}`} className={`chat-item${active ? ' active' : ''}`}>
       <span className="avatar-wrap">
-        <AvatarImage name={c.title} src={c.imageUrl} size={44} />
+        {c.type === 'group' ? (
+          <GroupImage memberIds={c.memberAvatarIds} avatars={avatars} title={c.title} size={44} />
+        ) : (
+          <AvatarImage name={c.title} src={c.imageUrl} size={44} />
+        )}
         <StatusDot avatar={avatar} />
       </span>
       <span className="chat-item-body">
@@ -136,7 +220,7 @@ function ChatItem({ c, avatar, active }: { c: ConversationDto; avatar?: AvatarDt
         </span>
         <span className="chat-item-bottom">
           <span className={`chat-item-preview${typing ? ' typing-text' : ''}${unread ? ' unread-text' : ''}`}>
-            {typing ? '輸入中…' : preview}
+            {typing ? typingText : preview}
           </span>
           {unread > 0 && (
             <span className="badge" aria-label={`${unread} 則未讀`}>
@@ -152,10 +236,12 @@ function ChatItem({ c, avatar, active }: { c: ConversationDto; avatar?: AvatarDt
 function ChatView({
   conversation,
   avatars,
+  mention,
   onToggleInfo,
 }: {
   conversation: ConversationDto;
   avatars: AvatarDto[];
+  mention: { name: string; n: number } | null;
   onToggleInfo: () => void;
 }) {
   const navigate = useNavigate();
@@ -168,7 +254,8 @@ function ChatView({
   const byId = useMemo(() => new Map(avatars.map((a) => [a.id, a])), [avatars]);
   const typingIds = useTyping(conversation.id);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const dmAvatar = conversation.type === 'dm' ? byId.get(conversation.memberAvatarIds[0] ?? '') : undefined;
+  const isGroup = conversation.type === 'group';
+  const dmAvatar = !isGroup ? byId.get(conversation.memberAvatarIds[0] ?? '') : undefined;
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -196,13 +283,19 @@ function ChatView({
         <button className="icon-btn only-narrow" onClick={() => navigate('/chats')} aria-label="返回聊天列表">
           <Icon name="back" />
         </button>
-        <AvatarImage name={conversation.title} src={conversation.imageUrl} size={36} />
+        {isGroup ? (
+          <GroupImage memberIds={conversation.memberAvatarIds} avatars={avatars} title={conversation.title} size={36} />
+        ) : (
+          <AvatarImage name={conversation.title} src={conversation.imageUrl} size={36} />
+        )}
         <div className="chat-head-text">
           <h1>{conversation.title}</h1>
           <span className={`chat-head-sub${typingIds.length ? ' typing-text' : ''}`}>
             {typingIds.length
-              ? '輸入中…'
-              : conversation.type === 'group'
+              ? isGroup
+                ? `${typingNames(typingIds, avatars)} 輸入中…`
+                : '輸入中…'
+              : isGroup
                 ? `${conversation.memberAvatarIds.length} 位成員`
                 : dmAvatar
                   ? `${STATUS_LABELS[dmAvatar.availability.status]}${dmAvatar.availability.activity ? `・${dmAvatar.availability.activity}` : ''}`
@@ -229,7 +322,9 @@ function ChatView({
         <MessageList
           messages={messages}
           byId={byId}
+          isGroup={isGroup}
           seenUpTo={conversation.seenUpTo}
+          members={conversation.members}
           showThoughts={!!settings?.showInnerThoughts}
           retryId={retryId}
           onRetry={() => void api.retryReply(conversation.id)}
@@ -239,7 +334,7 @@ function ChatView({
         ))}
       </div>
 
-      <Composer conversationId={conversation.id} />
+      <Composer conversationId={conversation.id} isGroup={isGroup} mention={mention} />
     </main>
   );
 }
@@ -262,19 +357,30 @@ function TypingBubble({ avatar }: { avatar?: AvatarDto }) {
 function MessageList({
   messages,
   byId,
+  isGroup,
   seenUpTo,
+  members,
   showThoughts,
   retryId,
   onRetry,
 }: {
   messages: MessageDto[];
   byId: Map<string, AvatarDto>;
+  isGroup: boolean;
   seenUpTo: string | null;
+  members: ConversationDto['members'];
   showThoughts: boolean;
   retryId: string | null;
   onRetry: () => void;
 }) {
   const seenAt = seenUpTo ? Date.parse(seenUpTo) : 0;
+  const memberSeen = members.map((m) => (m.seenUpTo ? Date.parse(m.seenUpTo) : 0));
+  const seenLabel = (createdAt: string): string | null => {
+    const t = Date.parse(createdAt);
+    if (!isGroup) return seenAt >= t ? '已讀' : null;
+    const n = memberSeen.filter((s) => s >= t).length;
+    return n ? `已讀 ${n}` : null;
+  };
   return (
     <>
       {messages.map((m, i) => {
@@ -288,6 +394,7 @@ function MessageList({
           Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 180_000;
         const mine = m.senderType === 'user';
         const sender = m.senderAvatarId ? byId.get(m.senderAvatarId) : undefined;
+        const seen = mine ? seenLabel(m.createdAt) : null;
         return (
           <div key={m.id}>
             {newDay && <div className="day-sep">{dayLabel(m.createdAt)}</div>}
@@ -308,6 +415,7 @@ function MessageList({
                   </span>
                 )}
                 <div className="msg-content">
+                  {isGroup && !mine && !grouped && <div className="msg-sender">{sender?.name ?? '（已刪除）'}</div>}
                   {showThoughts && (m.innerThought || m.traceId) && (
                     <div className="thought">
                       {m.innerThought && <>💭 {m.innerThought}</>}
@@ -322,7 +430,7 @@ function MessageList({
                   <div className="msg-line">
                     <div className="msg-bubble">{m.content}</div>
                     <span className="msg-meta">
-                      {mine && seenAt >= Date.parse(m.createdAt) && <span className="msg-seen">已讀</span>}
+                      {seen && <span className="msg-seen">{seen}</span>}
                       <time className="msg-time" dateTime={m.createdAt}>
                         {clockTime(m.createdAt)}
                       </time>
@@ -338,8 +446,20 @@ function MessageList({
   );
 }
 
-function Composer({ conversationId }: { conversationId: string }) {
+/** 群組：玩家打字時通知伺服器，這一輪會等玩家打完（伺服器等 3 秒） */
+const TYPING_PING_MS = 2000;
+
+function Composer({
+  conversationId,
+  isGroup,
+  mention,
+}: {
+  conversationId: string;
+  isGroup: boolean;
+  mention: { name: string; n: number } | null;
+}) {
   const [text, setText] = useState('');
+  const lastPing = useRef(0);
   const ref = useRef<HTMLTextAreaElement>(null);
   const toast = useToast();
   const qc = useQueryClient();
@@ -355,6 +475,17 @@ function Composer({ conversationId }: { conversationId: string }) {
       toast(`送出失敗：${errorText(err)}`, 'error');
     },
   });
+
+  // 資訊面板按了「@」
+  const mentionN = mention?.n;
+  const handledMention = useRef(mentionN);
+  useEffect(() => {
+    if (!mention || handledMention.current === mentionN) return;
+    handledMention.current = mentionN;
+    setText((t) => `${t}${t && !t.endsWith(' ') ? ' ' : ''}@${mention.name} `);
+    ref.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionN]);
 
   useEffect(() => {
     const el = ref.current;
@@ -382,9 +513,16 @@ function Composer({ conversationId }: { conversationId: string }) {
         ref={ref}
         rows={1}
         value={text}
-        placeholder="輸入訊息…"
+        placeholder={isGroup ? '輸入訊息…（@名字 可以點名）' : '輸入訊息…'}
         title="Enter 送出，Shift+Enter 換行"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          const now = Date.now();
+          if (isGroup && e.target.value.trim() && now - lastPing.current > TYPING_PING_MS) {
+            lastPing.current = now;
+            void api.typing(conversationId).catch(() => {});
+          }
+        }}
         onKeyDown={(e) => {
           // 注音、倉頡等輸入法選字時的 Enter 不能送出
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -404,10 +542,12 @@ function Composer({ conversationId }: { conversationId: string }) {
 function InfoPanel({
   conversation,
   avatars,
+  onMention,
   onClose,
 }: {
   conversation: ConversationDto;
   avatars: AvatarDto[];
+  onMention: (name: string) => void;
   onClose: () => void;
 }) {
   const avatar = conversation.type === 'dm' ? avatars.find((a) => a.id === conversation.memberAvatarIds[0]) : undefined;
@@ -450,9 +590,94 @@ function InfoPanel({
           </dl>
           <AvatarStatePanel avatarId={avatar.id} />
         </div>
+      ) : conversation.type === 'group' ? (
+        <GroupInfo conversation={conversation} avatars={avatars} onMention={onMention} />
       ) : (
-        <p className="hint pad">群組成員資訊在第 7 階段加入。</p>
+        <p className="hint pad">找不到這個 avatar。</p>
       )}
     </aside>
+  );
+}
+
+function GroupInfo({
+  conversation,
+  avatars,
+  onMention,
+}: {
+  conversation: ConversationDto;
+  avatars: AvatarDto[];
+  onMention: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const { data: conversations = [] } = useQuery({ queryKey: qk.conversations, queryFn: api.conversations });
+  const navigate = useNavigate();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: () => api.deleteGroup(conversation.id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: qk.conversations });
+      navigate('/chats');
+    },
+    onError: (err) => toast(errorText(err), 'error'),
+  });
+  const members = conversation.memberAvatarIds
+    .map((id) => avatars.find((a) => a.id === id))
+    .filter((a): a is AvatarDto => !!a);
+  const dmOf = (avatarId: string) =>
+    conversations.find((c) => c.type === 'dm' && c.memberAvatarIds[0] === avatarId)?.id;
+
+  return (
+    <div className="info-body">
+      <div className="info-hero">
+        <GroupImage memberIds={conversation.memberAvatarIds} avatars={avatars} title={conversation.title} size={96} />
+        <h2>{conversation.title}</h2>
+        <p className="info-bio">{members.length} 位成員</p>
+        <button className="btn" onClick={() => setEditing(true)}>
+          編輯群組
+        </button>
+      </div>
+      <h3 className="info-section">成員</h3>
+      <ul className="member-list">
+        {members.map((a) => {
+          const { status, activity } = a.availability;
+          const dm = dmOf(a.id);
+          return (
+            <li key={a.id}>
+              <span className="avatar-wrap">
+                <AvatarImage name={a.name} src={a.imageUrl} size={36} />
+                <StatusDot avatar={a} />
+              </span>
+              <span className="member-text">
+                <span className="member-name">{a.name}</span>
+                <span className="hint">
+                  {a.llm ? `${STATUS_LABELS[status]}${activity ? `・${activity}` : ''}` : '沒有綁定 LLM'}
+                </span>
+              </span>
+              <button className="icon-btn icon-btn-small" onClick={() => onMention(a.name)} title={`@${a.name}`} aria-label={`點名 ${a.name}`}>
+                @
+              </button>
+              {dm && (
+                <Link className="icon-btn icon-btn-small" to={`/chats/${dm}`} title="私訊" aria-label={`和 ${a.name} 私訊`}>
+                  <Icon name="chat" size={16} />
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="hint">
+        私訊裡聊的事，avatar 在群組裡會依自己的個性決定要不要提（「人格設定 → 行為準則 → 口風」）。
+      </p>
+      <button
+        className="btn btn-danger"
+        onClick={() => {
+          if (confirm(`確定要刪除「${conversation.title}」嗎？群組的聊天紀錄會一起刪除，avatar 記得的事不會刪除。`)) remove.mutate();
+        }}
+      >
+        刪除群組
+      </button>
+      {editing && <GroupDialog group={conversation} onClose={() => setEditing(false)} />}
+    </div>
   );
 }

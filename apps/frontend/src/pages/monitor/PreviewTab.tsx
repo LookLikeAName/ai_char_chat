@@ -9,14 +9,18 @@ import { useNames } from './common.ts';
 
 export function PreviewTab() {
   const toast = useToast();
-  const { conversations } = useNames();
-  const dms = conversations.filter((c) => c.type === 'dm');
+  const { conversations, avatarName } = useNames();
   const [conversationId, setConversationId] = useState('');
+  const [avatarId, setAvatarId] = useState('');
   const [mode, setMode] = useState<'reply' | 'proactive'>('reply');
-  const selected = conversationId || dms[0]?.id || '';
+  const selected = conversationId || conversations[0]?.id || '';
+  const conv = conversations.find((c) => c.id === selected);
+  const isGroup = conv?.type === 'group';
+  // 群組要指定以哪個成員的角度組 prompt
+  const speaker = isGroup ? (conv.memberAvatarIds.includes(avatarId) ? avatarId : conv.memberAvatarIds[0]) : undefined;
   const { data, refetch, isFetching, error } = useQuery({
-    queryKey: ['debug', 'preview', selected, mode],
-    queryFn: () => api.debug.preview(selected, mode),
+    queryKey: ['debug', 'preview', selected, mode, speaker],
+    queryFn: () => api.debug.preview(selected, mode, speaker),
     enabled: !!selected,
   });
   const extract = useMutation({
@@ -33,12 +37,21 @@ export function PreviewTab() {
       <p className="hint">依目前的設定、關係、記憶與作息，組出「現在回覆的話」會送給 LLM 的內容。預覽不會呼叫 LLM，也不會改變任何狀態。</p>
       <div className="filters">
         <select value={selected} onChange={(e) => setConversationId(e.target.value)} aria-label="對話">
-          {dms.map((c) => (
+          {conversations.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.title}
+              {c.type === 'group' ? `群組：${c.title}` : c.title}
             </option>
           ))}
         </select>
+        {isGroup && (
+          <select value={speaker} onChange={(e) => setAvatarId(e.target.value)} aria-label="成員">
+            {conv.memberAvatarIds.map((id) => (
+              <option key={id} value={id}>
+                {avatarName(id)}
+              </option>
+            ))}
+          </select>
+        )}
         <select value={mode} onChange={(e) => setMode(e.target.value as 'reply' | 'proactive')} aria-label="模式">
           <option value="reply">回覆</option>
           <option value="proactive">主動發話</option>

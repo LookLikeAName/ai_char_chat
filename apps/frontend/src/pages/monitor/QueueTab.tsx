@@ -20,6 +20,8 @@ const KIND_LABELS: Record<string, string> = {
   maintenance: '定期維護',
   'proactive.tick': '主動發話檢查',
   proactive: '主動發話',
+  'group.turn': '群組這一輪',
+  'group.proactive': '群組開話題',
 };
 
 export function QueueTab() {

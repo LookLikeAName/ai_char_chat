@@ -104,7 +104,15 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
           break;
         case 'conversation.seen':
           qc.setQueryData<ConversationDto[]>(qk.conversations, (list) =>
-            list?.map((c) => (c.id === e.conversationId ? { ...c, seenUpTo: e.seenUpTo } : c)),
+            list?.map((c) =>
+              c.id === e.conversationId
+                ? {
+                    ...c,
+                    seenUpTo: c.type === 'dm' ? e.seenUpTo : c.seenUpTo,
+                    members: c.members.map((m) => (m.avatarId === e.avatarId ? { ...m, seenUpTo: e.seenUpTo } : m)),
+                  }
+                : c,
+            ),
           );
           break;
         case 'avatars.changed':

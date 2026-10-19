@@ -49,6 +49,12 @@ describe('chooseSpeakers', () => {
     expect(chosen(chooseSpeakers(cands, { random: () => 0, forceOne: true }))).toEqual(['b']);
   });
 
+  it('玩家問大家時，普通的人也比較會開口', () => {
+    const avg = [c('a', { affinity: 0 }), c('b', { affinity: 0 })];
+    expect(chosen(chooseSpeakers(avg, { random: () => 0.5, forceOne: false }))).toEqual([]);
+    expect(chosen(chooseSpeakers(avg, { random: () => 0.5, forceOne: true }))).toHaveLength(2);
+  });
+
   it('最多 3 個人', () => {
     const many = ['a', 'b', 'c', 'd', 'e'].map((id) => c(id, { relevance: 1, extraversion: 100, affinity: 80 }));
     expect(chosen(chooseSpeakers(many, { random: () => 1, forceOne: false }))).toHaveLength(3);
