@@ -134,6 +134,21 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
         </details>
       </dd>
 
+      {state.today.length > 0 && (
+        <>
+          <dt>今天</dt>
+          <dd>
+            <ul className="today">
+              {state.today.map((e, i) => (
+                <li key={i}>
+                  <span className="hint">{e.time}</span> {e.text}
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </>
+      )}
+
       <dt>對你的印象</dt>
       <dd>
         {state.impression ? <p className="impression">{state.impression}</p> : <span className="hint">還沒有整理過。</span>}

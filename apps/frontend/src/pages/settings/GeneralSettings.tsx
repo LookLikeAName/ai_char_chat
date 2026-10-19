@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PROVIDER_LABELS, type AppSettings } from '@acc/shared';
+import { PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } from '@acc/shared';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
@@ -106,6 +106,43 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
 
       <section className="card">
         <h2>聊天</h2>
+        <label className="field">
+          <span className="field-label">回覆節奏</span>
+          <select value={s.replyPacing} onChange={(e) => patch({ replyPacing: e.target.value as ReplyPacing })}>
+            {Object.entries(PACING_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+          <span className="hint">
+            擬真模式下，avatar 依作息決定多久才看到訊息；一直傳訊息（尤其是「在嗎」「急」）會讓它提早看，睡覺時可能會被吵醒。
+          </span>
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.proactive.enabled}
+            onChange={(e) => patch({ proactive: { ...s.proactive, enabled: e.target.checked } })}
+          />
+          <span>avatar 會主動傳訊息給你</span>
+        </label>
+        {s.proactive.enabled && (
+          <label className="field">
+            <span className="field-label">每個 avatar 每天最多主動傳幾次</span>
+            <input
+              type="number"
+              className="narrow-input"
+              min={0}
+              max={20}
+              value={s.proactive.dailyLimit}
+              onChange={(e) =>
+                patch({ proactive: { ...s.proactive, dailyLimit: Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))) } })
+              }
+            />
+            <span className="hint">避開上面的勿擾時段與 avatar 睡覺的時間；關係越近、越外向、越久沒聊，越常找你。</span>
+          </label>
+        )}
         <label className="check">
           <input
             type="checkbox"

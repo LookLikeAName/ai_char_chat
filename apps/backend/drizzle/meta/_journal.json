@@ -43,6 +43,13 @@
       "when": 1792398369206,
       "tag": "0005_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792399892394,
+      "tag": "0006_pacing",
+      "breakpoints": true
     }
   ]
 }

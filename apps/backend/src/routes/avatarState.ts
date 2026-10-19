@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { resetRelationshipSchema, type AvatarStateDto } from '@acc/shared';
+import { eventsSoFar, localClock, resetRelationshipSchema, type AvatarStateDto } from '@acc/shared';
 import { avatars, memories } from '../db/schema.ts';
 import { notFound, parseBody } from '../errors.ts';
+import { getLifeLog } from '../life/lifeLog.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { reflect } from '../memory/reflect.ts';
 import { latestImpression } from '../memory/store.ts';
@@ -25,7 +26,9 @@ export async function avatarStateRoutes(app: FastifyInstance) {
   app.get('/avatars/:id/state', async (req): Promise<AvatarStateDto> => {
     const { id } = parseBody(idParams, req.params);
     await assertAvatar(id);
-    const [mood, rel, impression, rows] = await Promise.all([
+    const { timezone } = await loadSettings(db);
+    const clock = localClock(new Date(), timezone);
+    const [mood, rel, impression, rows, log] = await Promise.all([
       getMood(db, id),
       getRelationship(db, id),
       latestImpression(db, id),
@@ -35,6 +38,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
         .where(and(eq(memories.avatarId, id), eq(memories.kind, 'event')))
         .orderBy(desc(memories.createdAt))
         .limit(MEMORY_LIST),
+      getLifeLog(db, id, clock.date),
     ]);
     return {
       mood,
@@ -47,6 +51,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
         importance: m.importance,
         createdAt: m.createdAt.toISOString(),
       })),
+      today: log ? eventsSoFar(log, clock.hhmm) : [],
     };
   });
 

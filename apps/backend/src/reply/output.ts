@@ -59,13 +59,13 @@ function clean(messages: string[]): string[] {
     .map((m) => (m.length > MAX_MESSAGE_CHARS ? `${m.slice(0, MAX_MESSAGE_CHARS)}…` : m));
 }
 
-/** 解析失敗時回傳 null */
-export function parseReplyOutput(text: string): ReplyOutput | null {
+/** 解析失敗時回傳 null；allowEmpty 時（主動發話）明確給了空的 messages 也算成功 */
+export function parseReplyOutput(text: string, opts: { allowEmpty?: boolean } = {}): ReplyOutput | null {
   const parsed = outputSchema.safeParse(extractJson(text));
   if (!parsed.success) return null;
   const raw = parsed.data.messages ?? parsed.data.message;
   const messages = clean(typeof raw === 'string' ? [raw] : (raw ?? []));
-  if (!messages.length) return null;
+  if (!messages.length && !(opts.allowEmpty && Array.isArray(raw))) return null;
   const mood = moodSchema.safeParse(parsed.data.mood);
   return {
     innerThought: parsed.data.inner_thought?.trim() ?? '',

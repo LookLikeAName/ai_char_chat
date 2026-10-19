@@ -12,6 +12,12 @@ export const appSettingsSchema = z.object({
     .default({ enabled: true, start: '00:30', end: '08:00' }),
   /** 成人內容；開啟前前端要求確認已滿 18 歲 */
   adultContent: z.boolean().default(false),
+  /** avatar 回覆的節奏：擬真（依作息）、輕鬆（縮短）、即時 */
+  replyPacing: z.enum(['realistic', 'relaxed', 'instant']).default('realistic'),
+  /** avatar 主動傳訊息 */
+  proactive: z
+    .object({ enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(20) })
+    .default({ enabled: true, dailyLimit: 3 }),
   /** 在聊天畫面顯示 avatar 的內心想法（偷看用，也方便調整角色） */
   showInnerThoughts: z.boolean().default(false),
   /** 系統工具模型：補完設定、萃取記憶、生活日誌… */

@@ -212,7 +212,7 @@ describe.skipIf(!url)('API', () => {
       expect((await app.inject({ method: 'POST', url: `/api/conversations/${conv}/retry` })).statusCode).toBe(202);
       const page = (await app.inject({ url: `/api/conversations/${conv}/messages` })).json();
       expect(page.messages.map((m: { content: string }) => m.content)).toEqual(['嗨', '提示']);
-      expect(jobs).toEqual([{ kind: 'reply', conversationId: conv }]);
+      expect(jobs).toEqual([{ kind: 'reply', conversationId: conv, force: true }]);
       expect(events).toContainEqual({ type: 'messages.changed', conversationId: conv });
     });
 

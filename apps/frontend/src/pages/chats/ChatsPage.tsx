@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { PROVIDER_LABELS, resolveParams, type AvatarDto, type ConversationDto, type MessageDto } from '@acc/shared';
+import { PROVIDER_LABELS, resolveParams, STATUS_LABELS, type AvatarDto, type ConversationDto, type MessageDto } from '@acc/shared';
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { AvatarStatePanel } from '../../components/AvatarStatePanel.tsx';
 import { Icon } from '../../components/Icon.tsx';
@@ -14,12 +14,13 @@ export function ChatsPage() {
   const { conversationId } = useParams();
   const [infoOpen, setInfoOpen] = useState(() => window.matchMedia('(min-width: 1200px)').matches);
   const { data: conversations = [], isLoading } = useQuery({ queryKey: qk.conversations, queryFn: api.conversations });
-  const { data: avatars = [] } = useQuery({ queryKey: qk.avatars, queryFn: api.avatars });
+  // 狀態（在線／忙碌／睡覺）會隨時間改變，每分鐘更新一次
+  const { data: avatars = [] } = useQuery({ queryKey: qk.avatars, queryFn: api.avatars, refetchInterval: 60_000 });
   const current = conversations.find((c) => c.id === conversationId) ?? null;
 
   return (
     <div className={`chats${conversationId ? ' has-selection' : ''}${infoOpen && current ? ' info-open' : ''}`}>
-      <ChatList conversations={conversations} loading={isLoading} selectedId={conversationId} />
+      <ChatList conversations={conversations} avatars={avatars} loading={isLoading} selectedId={conversationId} />
       {current ? (
         <>
           <ChatView key={current.id} conversation={current} avatars={avatars} onToggleInfo={() => setInfoOpen((v) => !v)} />
@@ -42,10 +43,12 @@ export function ChatsPage() {
 
 function ChatList({
   conversations,
+  avatars,
   loading,
   selectedId,
 }: {
   conversations: ConversationDto[];
+  avatars: AvatarDto[];
   loading: boolean;
   selectedId?: string;
 }) {
@@ -71,8 +74,8 @@ function ChatList({
       </div>
       <div className="chat-list-scroll">
         {loading && <p className="hint pad">載入中…</p>}
-        <Section title="個人聊天" items={dms} selectedId={selectedId} />
-        <Section title="群組" items={groups} selectedId={selectedId} empty="群組功能在第 7 階段加入" />
+        <Section title="個人聊天" items={dms} avatars={avatars} selectedId={selectedId} />
+        <Section title="群組" items={groups} avatars={avatars} selectedId={selectedId} empty="群組功能在第 7 階段加入" />
       </div>
     </aside>
   );
@@ -81,11 +84,13 @@ function ChatList({
 function Section({
   title,
   items,
+  avatars,
   selectedId,
   empty,
 }: {
   title: string;
   items: ConversationDto[];
+  avatars: AvatarDto[];
   selectedId?: string;
   empty?: string;
 }) {
@@ -94,13 +99,25 @@ function Section({
       <h2 className="list-section">{title}</h2>
       {items.length === 0 && empty && <p className="hint pad">{empty}</p>}
       {items.map((c) => (
-        <ChatItem key={c.id} c={c} active={c.id === selectedId} />
+        <ChatItem
+          key={c.id}
+          c={c}
+          avatar={c.type === 'dm' ? avatars.find((a) => a.id === c.memberAvatarIds[0]) : undefined}
+          active={c.id === selectedId}
+        />
       ))}
     </section>
   );
 }
 
-function ChatItem({ c, active }: { c: ConversationDto; active: boolean }) {
+function StatusDot({ avatar }: { avatar?: AvatarDto }) {
+  if (!avatar) return null;
+  const { status, activity } = avatar.availability;
+  const label = `${STATUS_LABELS[status]}${activity ? `・${activity}` : ''}`;
+  return <span className={`status-badge status-${status}`} title={label} aria-label={label} role="img" />;
+}
+
+function ChatItem({ c, avatar, active }: { c: ConversationDto; avatar?: AvatarDto; active: boolean }) {
   const typing = useTyping(c.id).length > 0;
   const unread = active ? 0 : c.unreadCount;
   const preview = c.lastMessage
@@ -108,7 +125,10 @@ function ChatItem({ c, active }: { c: ConversationDto; active: boolean }) {
     : '還沒有訊息';
   return (
     <Link to={`/chats/${c.id}`} className={`chat-item${active ? ' active' : ''}`}>
-      <AvatarImage name={c.title} src={c.imageUrl} size={44} />
+      <span className="avatar-wrap">
+        <AvatarImage name={c.title} src={c.imageUrl} size={44} />
+        <StatusDot avatar={avatar} />
+      </span>
       <span className="chat-item-body">
         <span className="chat-item-top">
           <span className="chat-item-title">{c.title}</span>
@@ -184,7 +204,9 @@ function ChatView({
               ? '輸入中…'
               : conversation.type === 'group'
                 ? `${conversation.memberAvatarIds.length} 位成員`
-                : (dmAvatar?.bio ?? '')}
+                : dmAvatar
+                  ? `${STATUS_LABELS[dmAvatar.availability.status]}${dmAvatar.availability.activity ? `・${dmAvatar.availability.activity}` : ''}`
+                  : ''}
           </span>
         </div>
         <button className="icon-btn" onClick={onToggleInfo} aria-label="顯示或隱藏資訊面板" title="資訊面板">

@@ -77,7 +77,8 @@ export async function avatarRoutes(app: FastifyInstance) {
   }
 
   async function dto(row: typeof avatars.$inferSelect) {
-    return avatarToDto(row, (await dmMap(db, [row.id])).get(row.id)!);
+    const { timezone } = await loadSettings(db);
+    return avatarToDto(row, (await dmMap(db, [row.id])).get(row.id)!, timezone);
   }
 
   async function changed() {
@@ -88,7 +89,8 @@ export async function avatarRoutes(app: FastifyInstance) {
   app.get('/avatars', async () => {
     const rows = await db.select().from(avatars).orderBy(asc(avatars.createdAt));
     const dms = await dmMap(db, rows.map((r) => r.id));
-    return rows.map((r) => avatarToDto(r, dms.get(r.id)!));
+    const { timezone } = await loadSettings(db);
+    return rows.map((r) => avatarToDto(r, dms.get(r.id)!, timezone));
   });
 
   app.get('/avatars/:id', async (req) => dto(await load(parseBody(idParams, req.params).id)));

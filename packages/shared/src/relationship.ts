@@ -216,6 +216,8 @@ export interface AvatarStateDto {
   relationship: RelationshipState & { events: RelationshipEventRecord[] };
   impression: string | null;
   memories: MemoryDto[];
+  /** 今天到目前為止的生活日誌 */
+  today: { time: string; text: string }[];
 }
 
 export const resetRelationshipSchema = z.object({ stage: z.enum(INITIAL_STAGES) });

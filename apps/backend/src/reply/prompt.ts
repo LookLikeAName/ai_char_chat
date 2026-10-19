@@ -2,6 +2,8 @@
 import {
   currentBlock,
   ENUM_OPTIONS,
+  eventsSoFar,
+  localClock,
   personaSchema,
   romanceGuidance,
   ROMANCE_PREFS,
@@ -9,13 +11,17 @@ import {
   STAGE_LABELS,
   type AppSettings,
   type AssessmentResults,
+  type LifeLogEvent,
   type Mood,
   type Persona,
   type PersonaDraft,
   type Preferences,
   type RelationshipState,
+  type SeenReason,
   type Stage,
 } from '@acc/shared';
+
+export { localClock };
 import type { ChatMessage } from '../llm/index.ts';
 import { renderPersona } from '../persona/describe.ts';
 import { describePreferences, describeResults } from '../profile/describe.ts';
@@ -48,10 +54,22 @@ export interface PromptState {
   impression: string | null;
 }
 
+/** 這次回覆（或主動傳訊息）的當下情境 */
+export interface PromptSituation {
+  mode: 'reply' | 'proactive';
+  /** 回覆時：怎麼看到訊息的 */
+  reason?: SeenReason;
+  /** 回覆時：玩家第一則還沒讀的訊息，到看到為止過了多久 */
+  waitedMs?: number;
+}
+
 export interface ReplyPromptInput {
   avatar: PromptAvatar;
   user?: PromptUser | null;
   state?: PromptState | null;
+  situation?: PromptSituation;
+  /** 今天的生活日誌（全部；prompt 只放已經發生的） */
+  lifeLog?: LifeLogEvent[] | null;
   settings: Pick<AppSettings, 'timezone' | 'adultContent'>;
   /** 由舊到新 */
   history: HistoryMessage[];
@@ -85,19 +103,6 @@ export function formatGap(ms: number): string {
   return `${Math.round(hours / 24)} 天`;
 }
 
-/** 某時區的「現在」：是否週末、HH:MM */
-export function localClock(now: Date, timezone: string): { weekend: boolean; hhmm: string } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  return { weekend: ['Sat', 'Sun'].includes(get('weekday')), hhmm: `${get('hour')}:${get('minute')}` };
-}
-
 /** 完整的人格設定；還沒建立（或不完整）時回傳 null，只用簡介 */
 export function completePersona(draft: PersonaDraft): Persona | null {
   const r = personaSchema.safeParse(draft);
@@ -105,7 +110,7 @@ export function completePersona(draft: PersonaDraft): Persona | null {
 }
 
 export function buildSystemPrompt(input: ReplyPromptInput): string {
-  const { avatar, settings, now, history, user, state } = input;
+  const { avatar, settings, now, history, user, state, situation, lifeLog } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
@@ -141,17 +146,41 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone)}\n` : ''}${user
 - ${content}
 
 # 現在
-現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}
+現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity)}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
 {"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3, "relationship_event": null}` : '}'}${
     state
       ? `
-- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
+${situation?.mode === 'proactive' ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
 - relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
       : ''
   }`;
+}
+
+function todaySection(log: LifeLogEvent[] | null | undefined, hhmm: string): string {
+  const done = log ? eventsSoFar(log, hhmm) : [];
+  if (!done.length) return '';
+  return `\n\n## 你今天到目前為止\n${done.map((e) => `- ${e.time} ${e.text}`).join('\n')}`;
+}
+
+const SITUATIONS: Record<SeenReason, (activity: string, waited: string) => string> = {
+  normal: () => '',
+  peek: (a) => `你正在${a || '忙'}，抽空偷看手機回一下。`,
+  late: (a, w) => `你剛剛在${a || '忙'}，${w ? `過了 ${w}才看到` : '現在才看到'}對方的訊息。`,
+  interrupted: (a) => `你正在${a || '忙'}，對方一直傳訊息，你只好先停下來看手機。依你的個性反應（可能有點煩、也可能擔心對方怎麼了）。`,
+  woken: () => '你原本在睡覺，被對方連續的訊息吵醒了。依你的個性反應（可能迷糊、有點不爽，或擔心對方出了什麼事）。',
+};
+
+function situationSection(s: PromptSituation | undefined, activity: string | undefined): string {
+  if (!s) return '';
+  if (s.mode === 'proactive') {
+    return `\n\n## 這次的情況\n對方現在沒有在跟你聊天，是你想主動傳訊息給對方。可以聊今天發生的事、追問對方之前提過的事、分享你看到的東西，或只是想念對方；要自然，不要像客服或制式問候。`;
+  }
+  const waited = s.waitedMs && s.waitedMs > 5 * 60_000 ? formatGap(s.waitedMs) : '';
+  const text = s.reason ? SITUATIONS[s.reason](activity ?? '', waited) : '';
+  return text ? `\n\n## 這次的情況\n${text}` : '';
 }
 
 const FAMILIAR: Stage[] = ['friend', 'close', 'crush', 'lover'];

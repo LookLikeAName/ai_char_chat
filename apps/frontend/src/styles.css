@@ -2302,3 +2302,51 @@ fieldset.field {
   width: auto;
   flex: 1;
 }
+
+/* ---------- 第 6 階段：狀態 ---------- */
+
+.avatar-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.status-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.status-free {
+  background: var(--ok);
+}
+
+.status-busy {
+  background: var(--warn);
+}
+
+.status-sleep {
+  background: var(--text-2);
+}
+
+.chat-item.active .status-badge {
+  box-shadow: 0 0 0 2px var(--active);
+}
+
+.today {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.row input[type='time'] {
+  width: auto !important;
+}

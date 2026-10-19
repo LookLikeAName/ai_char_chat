@@ -113,8 +113,8 @@ describe('回覆 prompt 使用完整人格', () => {
   });
 
   it('localClock 依時區判斷週末與時間', () => {
-    expect(localClock(new Date('2026-10-18T16:30:00Z'), 'Asia/Taipei')).toEqual({ weekend: false, hhmm: '00:30' }); // 週一凌晨
-    expect(localClock(new Date('2026-10-18T03:05:00Z'), 'Asia/Taipei')).toEqual({ weekend: true, hhmm: '11:05' }); // 週日
+    expect(localClock(new Date('2026-10-18T16:30:00Z'), 'Asia/Taipei')).toMatchObject({ weekend: false, hhmm: '00:30' }); // 週一凌晨
+    expect(localClock(new Date('2026-10-18T03:05:00Z'), 'Asia/Taipei')).toMatchObject({ weekend: true, hhmm: '11:05' }); // 週日
   });
 });
 

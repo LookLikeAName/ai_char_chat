@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type {
   AllAnswers,
+  LifeLogEvent,
   LlmBinding,
   LlmParams,
   Mood,
@@ -23,6 +24,7 @@ import type {
   Preferences,
   ProviderType,
   RelationshipEventRecord,
+  SeenReason,
   Stage,
 } from '@acc/shared';
 
@@ -31,6 +33,8 @@ export interface MessageMeta {
   innerThought?: string;
   /** 系統訊息的種類 */
   systemKind?: 'error' | 'notice';
+  /** avatar 主動傳的訊息（不是回覆） */
+  proactive?: boolean;
 }
 
 const timestamps = {
@@ -97,6 +101,10 @@ export const conversationMembers = pgTable(
     handledUpTo: timestamp('handled_up_to', { withTimezone: true, precision: 3 }),
     /** 記憶萃取處理到哪個時間點（含） */
     memoryUpTo: timestamp('memory_up_to', { withTimezone: true, precision: 3 }),
+    /** 預計什麼時候「看到」還沒讀的訊息；新訊息只會讓它提前 */
+    replyDueAt: timestamp('reply_due_at', { withTimezone: true, precision: 3 }),
+    /** 看到的原因（normal、peek、late、interrupted、woken），回覆時告訴 avatar 當下的情境 */
+    replyReason: text('reply_reason').$type<SeenReason>(),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.avatarId] }), index('conversation_members_avatar_idx').on(t.avatarId)],
 );
@@ -211,4 +219,22 @@ export const avatarState = pgTable('avatar_state', {
   moodUpdatedAt: timestamp('mood_updated_at', { withTimezone: true }).notNull().defaultNow(),
   /** 最後一次反思（整理印象）的時間 */
   reflectedAt: timestamp('reflected_at', { withTimezone: true }),
+  /** 主動發話的次數（當地日期 + 次數，換日歸零） */
+  proactiveDate: text('proactive_date'),
+  proactiveCount: integer('proactive_count').notNull().default(0),
 });
+
+/** 每天的生活日誌：主動聊天的話題，也讓 avatar 知道自己今天做了什麼 */
+export const lifeLogs = pgTable(
+  'life_logs',
+  {
+    avatarId: uuid('avatar_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    /** avatar 所在時區（設定的時區）的日期，YYYY-MM-DD */
+    date: text('date').notNull(),
+    events: jsonb('events').$type<LifeLogEvent[]>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.avatarId, t.date] })],
+);

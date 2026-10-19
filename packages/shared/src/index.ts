@@ -6,3 +6,4 @@ export * from './events.ts';
 export * from './persona.ts';
 export * from './assessment.ts';
 export * from './relationship.ts';
+export * from './availability.ts';

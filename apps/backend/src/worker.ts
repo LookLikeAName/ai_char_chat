@@ -8,6 +8,7 @@ import { avatars } from './db/schema.ts';
 import { RedisEventPublisher, WORKER_HEARTBEAT_KEY } from './events/bus.ts';
 import { AGENT_QUEUE, MEMORY_JOB_OPTIONS, REPLY_JOB_OPTIONS, type AgentJob } from './jobs.ts';
 import { RedisLock } from './lock.ts';
+import { proactiveTick } from './proactive/tick.ts';
 import { embedderFromSettings } from './memory/embedder.ts';
 import { extractMemories } from './memory/extract.ts';
 import { reflect } from './memory/reflect.ts';
@@ -80,7 +81,7 @@ const worker = new Worker<AgentJob>(
     const data = job.data;
     switch (data.kind) {
       case 'reply': {
-        const result = await engine.handle(data.conversationId);
+        const result = await engine.handle(data.conversationId, { force: data.force });
         if (result === 'busy') await queue.add('reply', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
         return result;
       }
@@ -91,6 +92,17 @@ const worker = new Worker<AgentJob>(
       }
       case 'maintenance':
         return maintenance();
+      case 'proactive.tick': {
+        const settings = await loadSettings(db);
+        const decisions = await proactiveTick(ctx, settings, (j, delay) =>
+          queue.add(j.kind, j, { ...KEEP, delay, attempts: 1 }).then(() => undefined),
+        );
+        const sent = decisions.filter((d) => d.action === 'enqueued');
+        if (sent.length) console.log(`[proactive] ${sent.length} 個 avatar 決定主動傳訊息`);
+        return decisions;
+      }
+      case 'proactive':
+        return engine.handleProactive(data.conversationId);
     }
   },
   // 每個對話有自己的鎖，不同對話可以同時處理
@@ -106,6 +118,11 @@ worker.on('failed', (job, err) => {
 });
 
 await queue.upsertJobScheduler('maintenance', { every: 60 * 60 * 1000 }, { name: 'maintenance', data: { kind: 'maintenance' } });
+await queue.upsertJobScheduler(
+  'proactive.tick',
+  { every: 15 * 60 * 1000 },
+  { name: 'proactive.tick', data: { kind: 'proactive.tick' } },
+);
 
 async function beat() {
   await redis.set(WORKER_HEARTBEAT_KEY, new Date().toISOString(), 'EX', 60).catch(() => {});

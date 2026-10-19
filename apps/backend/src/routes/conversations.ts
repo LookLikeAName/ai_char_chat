@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { sendMessageSchema, type ConversationDto } from '@acc/shared';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
 import { notFound, parseBody } from '../errors.ts';
-import { debounceMs } from '../reply/timing.ts';
+import { scheduleReply } from '../reply/planner.ts';
 import { mediaUrl } from '../services/avatars.ts';
 import { messageToDto, postMessage } from '../services/messages.ts';
 
@@ -92,8 +92,8 @@ export async function conversationRoutes(app: FastifyInstance) {
     const { content } = parseBody(sendMessageSchema, req.body);
     await assertConversation(id);
     const dto = await postMessage(db, events, { conversationId: id, senderType: 'user', content });
-    // 延遲一下再處理：玩家連續傳的訊息會合併成一次回覆
-    await jobs.add({ kind: 'reply', conversationId: id }, { delayMs: debounceMs(Math.random) });
+    // 依 avatar 的作息決定什麼時候看到；連續傳的訊息會合併成一次回覆
+    await scheduleReply(db, jobs, id);
     return reply.status(201).send(dto);
   });
 
@@ -114,7 +114,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       .delete(messages)
       .where(and(eq(messages.conversationId, id), eq(messages.senderType, 'system'), sql`${messages.meta}->>'systemKind' = 'error'`));
     await events.publish({ type: 'messages.changed', conversationId: id });
-    await jobs.add({ kind: 'reply', conversationId: id });
+    await jobs.add({ kind: 'reply', conversationId: id, force: true });
     return reply.status(202).send();
   });
 

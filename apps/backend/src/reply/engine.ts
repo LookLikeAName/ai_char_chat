@@ -8,13 +8,14 @@
 //
 // 產生或打字期間玩家又傳了訊息：還沒送出任何一則就整輪重來（連同新訊息一起回）；
 // 已經送出幾則就停在這裡，下一輪再回新訊息。
-import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm';
-import type { AppSettings } from '@acc/shared';
+import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { localClock, type AppSettings } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
-import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
+import { avatars, avatarState, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
 import type { FetchFn } from '../llm/index.ts';
+import { getLifeLog } from '../life/lifeLog.ts';
 import type { Lock } from '../lock.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { latestImpression, retrieveMemories } from '../memory/store.ts';
@@ -24,7 +25,7 @@ import { callWithBinding } from '../services/llmCall.ts';
 import { postMessage } from '../services/messages.ts';
 import { loadSettings } from '../services/settings.ts';
 import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
-import { buildReplyPrompt, type HistoryMessage } from './prompt.ts';
+import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptSituation } from './prompt.ts';
 import { betweenMessagesMs, readPauseMs, typingMs, type Random } from './timing.ts';
 
 export interface ReplyEngineDeps {
@@ -46,6 +47,9 @@ interface Ctx {
   conversationId: string;
   avatar: typeof avatars.$inferSelect;
   handledUpTo: Date | null;
+  seenUpTo: Date | null;
+  replyDueAt: Date | null;
+  replyReason: PromptSituation['reason'] | null;
 }
 
 const LOCK_TTL_MS = 3 * 60 * 1000;
@@ -66,8 +70,11 @@ export class ReplyEngine {
     this.now = deps.now ?? (() => new Date());
   }
 
-  /** 'busy'：另一個流程正在處理這個對話，呼叫端應該稍後再試 */
-  async handle(conversationId: string): Promise<'busy' | 'done'> {
+  /**
+   * 'busy'：另一個流程正在處理這個對話，呼叫端應該稍後再試。
+   * 'early'：還沒到預計看到訊息的時間（之後排定的工作會處理）。force 會忽略預計時間（重試用）。
+   */
+  async handle(conversationId: string, opts: { force?: boolean } = {}): Promise<'busy' | 'done' | 'early'> {
     const key = `reply:${conversationId}`;
     const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
     if (!token) return 'busy';
@@ -82,6 +89,8 @@ export class ReplyEngine {
         if (!ctx) return 'done';
         const snapshot = await this.latestUserMessageAt(conversationId);
         if (!snapshot || (ctx.handledUpTo && snapshot <= ctx.handledUpTo)) return 'done';
+        const now = this.now();
+        if (round === 0 && !opts.force && ctx.replyDueAt && now.getTime() < ctx.replyDueAt.getTime() - 1000) return 'early';
 
         if (!ctx.avatar.llm) {
           await this.noticeOnce(
@@ -92,8 +101,13 @@ export class ReplyEngine {
           return 'done';
         }
 
+        // 第一輪才有「怎麼看到訊息」的情境；之後是正在聊天中
+        const situation: PromptSituation =
+          round === 0
+            ? { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) }
+            : { mode: 'reply', reason: 'normal' };
         await this.markSeen(ctx, snapshot);
-        const outcome = await this.generateAndSend(ctx, snapshot, setTyping);
+        const outcome = await this.generateAndSend(ctx, snapshot, setTyping, situation);
         if (outcome.kind === 'restart') continue;
         await this.markHandled(ctx, snapshot);
         await this.applyState(ctx, outcome.output);
@@ -104,6 +118,88 @@ export class ReplyEngine {
       if (typingAvatar) await setTyping(typingAvatar, false).catch(() => {});
       await this.deps.lock.release(key, token);
     }
+  }
+
+  /**
+   * 主動傳訊息給玩家。玩家有還沒回的訊息時不做（交給回覆流程）；模型可以決定這次不說話。
+   * 回傳 'sent' 時，至少送出了一則。
+   */
+  async handleProactive(conversationId: string): Promise<'busy' | 'skipped' | 'sent'> {
+    const key = `reply:${conversationId}`;
+    const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
+    if (!token) return 'busy';
+    let typing: string | null = null;
+    const setTyping = async (avatarId: string, on: boolean) => {
+      typing = on ? avatarId : null;
+      await this.deps.events.publish({ type: 'typing', conversationId, avatarId, typing: on });
+    };
+    try {
+      const ctx = await this.loadContext(conversationId);
+      if (!ctx?.avatar.llm) return 'skipped';
+      const latestUser = await this.latestUserMessageAt(conversationId);
+      if (latestUser && (!ctx.handledUpTo || latestUser > ctx.handledUpTo)) return 'skipped';
+
+      const startedAt = this.now();
+      const output = await this.generate(ctx, { mode: 'proactive' });
+      if (!output.messages.length) return 'skipped';
+      let sent = 0;
+      for (const [i, text] of output.messages.entries()) {
+        await setTyping(ctx.avatar.id, true);
+        await this.sleep(typingMs(text, this.random, ctx.avatar.persona.speech?.typingSpeed));
+        // 玩家剛好傳了訊息：停下來，交給回覆流程
+        if (await this.hasNewerUserMessage(conversationId, latestUser ?? startedAt)) break;
+        await postMessage(this.deps.db, this.deps.events, {
+          conversationId,
+          senderType: 'avatar',
+          senderAvatarId: ctx.avatar.id,
+          content: text,
+          meta: { proactive: true, ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}) },
+        });
+        sent++;
+        await setTyping(ctx.avatar.id, false);
+        if (i < output.messages.length - 1) await this.sleep(betweenMessagesMs(this.random));
+      }
+      if (!sent) return 'skipped';
+      await this.bumpProactiveCount(ctx.avatar.id);
+      await this.applyState(ctx, output);
+      await this.deps.onReplied?.(ctx.avatar.id, conversationId);
+      return 'sent';
+    } finally {
+      if (typing) await setTyping(typing, false).catch(() => {});
+      await this.deps.lock.release(key, token);
+    }
+  }
+
+  private async bumpProactiveCount(avatarId: string): Promise<void> {
+    const { timezone } = await loadSettings(this.deps.db);
+    const date = localClock(this.now(), timezone).date;
+    await this.deps.db
+      .insert(avatarState)
+      .values({ avatarId, mood: { label: '平常', valence: 0, energy: 0 }, proactiveDate: date, proactiveCount: 1 })
+      .onConflictDoUpdate({
+        target: avatarState.avatarId,
+        set: {
+          proactiveCount: sql`case when ${avatarState.proactiveDate} = ${date} then ${avatarState.proactiveCount} + 1 else 1 end`,
+          proactiveDate: date,
+        },
+      });
+  }
+
+  /** 玩家第一則還沒讀的訊息，到現在過了多久 */
+  private async waitedMs(ctx: Ctx, now: Date): Promise<number> {
+    const [first] = await this.deps.db
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, ctx.conversationId),
+          eq(messages.senderType, 'user'),
+          ctx.seenUpTo ? gt(messages.createdAt, ctx.seenUpTo) : undefined,
+        ),
+      )
+      .orderBy(asc(messages.createdAt))
+      .limit(1);
+    return first ? Math.max(0, now.getTime() - first.createdAt.getTime()) : 0;
   }
 
   /** 重試都失敗後，在對話裡留一則系統訊息，玩家可以按「重試」 */
@@ -122,13 +218,14 @@ export class ReplyEngine {
     ctx: Ctx,
     snapshot: Date,
     setTyping: (avatarId: string, typing: boolean) => Promise<void>,
+    situation: PromptSituation,
   ): Promise<Outcome> {
     const avatarId = ctx.avatar.id;
     await this.sleep(readPauseMs(this.random));
     if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) return { kind: 'restart' };
 
     await setTyping(avatarId, true);
-    const output = await this.generate(ctx);
+    const output = await this.generate(ctx, situation);
     if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) {
       await setTyping(avatarId, false);
       return { kind: 'restart' };
@@ -169,7 +266,7 @@ export class ReplyEngine {
     if (changed) await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
   }
 
-  private async generate(ctx: Ctx): Promise<ReplyOutput> {
+  private async generate(ctx: Ctx, situation: PromptSituation): Promise<ReplyOutput> {
     const settings: AppSettings = await loadSettings(this.deps.db);
     const db = this.deps.db;
     const history = await this.loadHistory(ctx.conversationId);
@@ -187,7 +284,8 @@ export class ReplyEngine {
       .map((m) => m.content)
       .join('\n');
     const memories = await retrieveMemories(db, embedder, { avatarId: ctx.avatar.id, query, now });
-    const { system, messages: chat } = buildReplyPrompt({
+    const lifeLog = await getLifeLog(db, ctx.avatar.id, localClock(now, settings.timezone).date);
+    const { system, messages: built } = buildReplyPrompt({
       avatar: { name: ctx.avatar.name, bio: ctx.avatar.bio, persona: ctx.avatar.persona },
       user: profile.preferences
         ? { preferences: profile.preferences, summary: profile.summary, results: profile.results }
@@ -198,10 +296,25 @@ export class ReplyEngine {
         memories,
         impression: impression?.content ?? null,
       },
+      situation,
+      lifeLog,
       settings,
       history,
       now,
     });
+    // 主動傳訊息時，最後一則不是玩家說的話；補一個提示回合（Anthropic、Gemini 要求最後是 user）
+    const last = history.at(-1);
+    const chat =
+      situation.mode === 'proactive'
+        ? [
+            ...built,
+            {
+              role: 'user' as const,
+              content: `（系統：${last ? `距離上一則訊息過了 ${formatGap(now.getTime() - last.createdAt.getTime())}。` : '你們還沒聊過天。'}現在由你主動傳訊息給對方。）`,
+            },
+          ]
+        : built;
+    const allowEmpty = situation.mode === 'proactive';
     const call = (extra: typeof chat = []) =>
       callWithBinding(
         this.deps,
@@ -211,27 +324,37 @@ export class ReplyEngine {
       );
 
     const first = await call();
-    const parsed = parseReplyOutput(first.text);
+    const parsed = parseReplyOutput(first.text, { allowEmpty });
     if (parsed) return parsed;
     // 格式不對：提醒一次再試
     const second = await call([
       { role: 'assistant', content: first.text },
       { role: 'user', content: FORMAT_REMINDER },
     ]);
-    const output = parseReplyOutput(second.text) ?? plainTextFallback(first.text) ?? plainTextFallback(second.text);
+    const output =
+      parseReplyOutput(second.text, { allowEmpty }) ?? plainTextFallback(first.text) ?? plainTextFallback(second.text);
     if (!output) throw new Error(`模型的輸出無法解析：${first.text.slice(0, 120)}`);
     return output;
   }
 
   private async loadContext(conversationId: string): Promise<Ctx | null> {
     const [row] = await this.deps.db
-      .select({ avatar: avatars, handledUpTo: conversationMembers.handledUpTo })
+      .select({ avatar: avatars, member: conversationMembers })
       .from(conversations)
       .innerJoin(conversationMembers, eq(conversationMembers.conversationId, conversations.id))
       .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
       // 群組的回覆在第 7 階段
       .where(and(eq(conversations.id, conversationId), eq(conversations.type, 'dm')));
-    return row ? { conversationId, avatar: row.avatar, handledUpTo: row.handledUpTo } : null;
+    return row
+      ? {
+          conversationId,
+          avatar: row.avatar,
+          handledUpTo: row.member.handledUpTo,
+          seenUpTo: row.member.seenUpTo,
+          replyDueAt: row.member.replyDueAt,
+          replyReason: row.member.replyReason,
+        }
+      : null;
   }
 
   private async latestUserMessageAt(conversationId: string): Promise<Date | null> {
@@ -281,7 +404,8 @@ export class ReplyEngine {
   private async markHandled(ctx: Ctx, snapshot: Date): Promise<void> {
     await this.deps.db
       .update(conversationMembers)
-      .set({ handledUpTo: snapshot })
+      // 回完了，下一則訊息重新計算什麼時候看到
+      .set({ handledUpTo: snapshot, replyDueAt: null, replyReason: null })
       .where(and(eq(conversationMembers.conversationId, ctx.conversationId), eq(conversationMembers.avatarId, ctx.avatar.id)));
   }
 

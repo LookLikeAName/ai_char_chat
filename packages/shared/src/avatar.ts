@@ -34,6 +34,8 @@ export interface AvatarDto {
   personaLocks: PersonaPath[];
   /** 人格設定是否已全部填滿 */
   personaComplete: boolean;
+  /** 依作息推算的目前狀態 */
+  availability: { status: 'free' | 'busy' | 'sleep'; activity: string; until: string | null };
   /** 這個 avatar 的一對一聊天 */
   dmConversationId: string;
   createdAt: string;
