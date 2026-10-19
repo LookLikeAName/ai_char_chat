@@ -1,8 +1,10 @@
 // WebSocket：收到伺服器事件就更新 React Query 的快取；斷線時自動重連（指數退避，最多 15 秒）。
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ClientMessage, ConversationDto, DebugEventDto, MessageDto, ServerEvent, TraceSummaryDto } from '@acc/shared';
+import { useNavigate } from 'react-router';
+import type { AvatarDto, ClientMessage, ConversationDto, DebugEventDto, MessageDto, ServerEvent, TraceSummaryDto } from '@acc/shared';
 import { qk } from './api.ts';
+import { showNotification } from './notify.ts';
 
 export type WsStatus = 'connecting' | 'open' | 'closed';
 const WsStatusContext = createContext<WsStatus>('connecting');
@@ -38,6 +40,9 @@ type MessagesPage = { messages: MessageDto[]; hasMore: boolean };
 
 export function ServerEventsProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   const [status, setStatus] = useState<WsStatus>('connecting');
   const [typing, setTypingMap] = useState<TypingMap>({});
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -80,6 +85,19 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
 
+    const notify = (m: MessageDto) => {
+      const sender = qc.getQueryData<AvatarDto[]>(qk.avatars)?.find((a) => a.id === m.senderAvatarId);
+      const conv = qc.getQueryData<ConversationDto[]>(qk.conversations)?.find((c) => c.id === m.conversationId);
+      const name = sender?.name ?? conv?.title ?? '新訊息';
+      showNotification({
+        title: conv?.type === 'group' ? `${name}（${conv.title}）` : name,
+        body: m.content,
+        icon: sender?.imageUrl,
+        tag: m.conversationId,
+        onClick: () => navigateRef.current(`/chats/${m.conversationId}`),
+      });
+    };
+
     const handle = (e: ServerEvent) => {
       switch (e.type) {
         case 'message.created':
@@ -91,6 +109,7 @@ export function ServerEventsProvider({ children }: { children: ReactNode }) {
               : page,
           );
           void qc.invalidateQueries({ queryKey: qk.conversations });
+          if (e.message.senderType === 'avatar') notify(e.message);
           break;
         case 'conversations.changed':
           void qc.invalidateQueries({ queryKey: qk.conversations });

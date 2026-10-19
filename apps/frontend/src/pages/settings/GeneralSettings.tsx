@@ -5,6 +5,7 @@ import { PACING_LABELS, PROVIDER_LABELS, type AppSettings, type ReplyPacing } fr
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
+import { notificationsSupported, setNotifications, useNotificationsEnabled } from '../../lib/notify.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
 
 export function GeneralSettings() {
@@ -153,6 +154,7 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
           <span>顯示 avatar 的內心想法</span>
         </label>
         <p className="hint">在 avatar 訊息上方顯示它回覆時心裡在想什麼。偷看會少一點神秘感，但很適合用來調整角色設定。</p>
+        <NotificationToggle />
       </section>
 
       <section className="card">
@@ -299,5 +301,29 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
         </button>
       </footer>
     </form>
+  );
+}
+
+/** 通知權限是每個瀏覽器各自的，開關立刻生效，不用按「儲存」 */
+function NotificationToggle() {
+  const enabled = useNotificationsEnabled();
+  const toast = useToast();
+  if (!notificationsSupported) return <p className="hint">這個瀏覽器不支援通知。</p>;
+  return (
+    <>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={async (e) => {
+            const want = e.target.checked;
+            const ok = await setNotifications(want);
+            if (want && !ok) toast('瀏覽器沒有允許通知，請到瀏覽器的網站設定開啟', 'error');
+          }}
+        />
+        <span>瀏覽器通知</span>
+      </label>
+      <p className="hint">這個分頁在背景時，avatar 傳來訊息會跳出通知。只對這個瀏覽器有效，馬上生效。</p>
+    </>
   );
 }
