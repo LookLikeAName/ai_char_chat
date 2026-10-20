@@ -21,6 +21,7 @@ import { llmProfileRoutes } from './routes/llmProfiles.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { transferRoutes } from './routes/transfer.ts';
+import { backupRoutes } from './routes/backup.ts';
 import { uploadRoutes } from './routes/uploads.ts';
 import { usageRoutes } from './routes/usage.ts';
 import { AuthService } from './services/auth.ts';
@@ -83,6 +84,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await api.register(authRoutes);
       await api.register(healthRoutes);
       await api.register(settingsRoutes);
+      await api.register(backupRoutes);
       await api.register(llmProfileRoutes);
       await api.register(avatarRoutes);
       await api.register(avatarStateRoutes);

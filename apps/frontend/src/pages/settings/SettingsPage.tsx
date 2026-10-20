@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router';
+import { BackupSettings } from './BackupSettings.tsx';
 import { GeneralSettings } from './GeneralSettings.tsx';
 import { LlmProfilesSettings } from './LlmProfilesSettings.tsx';
 import { SystemStatus } from './SystemStatus.tsx';
@@ -10,6 +11,7 @@ const TABS = [
   { to: 'llm', label: 'LLM 設定檔' },
   { to: 'usage', label: '用量' },
   { to: 'security', label: '安全性' },
+  { to: 'backup', label: '備份' },
   { to: 'system', label: '系統狀態' },
 ];
 
@@ -35,6 +37,7 @@ export function SettingsPage() {
           <Route path="llm/*" element={<LlmProfilesSettings />} />
           <Route path="usage" element={<UsageSettings />} />
           <Route path="security" element={<SecuritySettings />} />
+          <Route path="backup" element={<BackupSettings />} />
           <Route path="system" element={<SystemStatus />} />
         </Routes>
       </main>

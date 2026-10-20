@@ -1,5 +1,7 @@
 import type {
   AppSettings,
+  SettingsFile,
+  SettingsImportResultDto,
   AdultTestResult,
   AvatarDto,
   AvatarLink,
@@ -141,6 +143,10 @@ export const api = {
   exportUrl: (avatarId: string | null, opts: { memories: boolean; history: boolean }) =>
     `/api/avatars/${avatarId ? `${avatarId}/` : ''}export${query({ memories: String(opts.memories), history: String(opts.history) })}`,
   importAvatars: (input: ImportRequest) => request<ImportResultDto>('POST', '/api/avatars/import', input),
+  settingsExportUrl: (opts: { apiKeys: boolean; player: boolean }) =>
+    `/api/settings/export${query({ apiKeys: String(opts.apiKeys), player: String(opts.player) })}`,
+  importSettings: (input: { file: SettingsFile; include: { settings: boolean; profiles: boolean; player: boolean } }) =>
+    request<SettingsImportResultDto>('POST', '/api/settings/import', input),
   usage: (days: number) => request<UsageSummaryDto>('GET', `/api/usage?days=${days}`),
 
   avatarState: (id: string) => request<AvatarStateDto>('GET', `/api/avatars/${id}/state`),

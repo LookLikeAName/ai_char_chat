@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import {
   cleanAnswers,
+  INSTRUMENT_IDS,
   scoreAll,
   type AllAnswers,
   type AppSettings,
@@ -47,6 +48,22 @@ export async function loadProfile(db: Db): Promise<ProfileDto> {
 
 export async function savePreferences(db: Db, preferences: Preferences): Promise<ProfileDto> {
   await saveRow(db, { preferences, inputsUpdatedAt: new Date() });
+  return loadProfile(db);
+}
+
+/** 匯入：整份取代玩家 profile（作答只留認得的題目） */
+export async function replaceProfile(
+  db: Db,
+  p: { preferences: Preferences | null; answers: Record<string, unknown>; summary: string },
+): Promise<ProfileDto> {
+  const answers: AllAnswers = {};
+  for (const id of INSTRUMENT_IDS) {
+    const a = p.answers[id];
+    if (a && typeof a === 'object') answers[id] = cleanAnswers(id, a as Record<string, unknown>);
+  }
+  const now = new Date();
+  // 摘要和作答是一起匯出的，視為沒有過期
+  await saveRow(db, { preferences: p.preferences, answers, summary: p.summary, summaryAt: p.summary ? now : null, inputsUpdatedAt: now });
   return loadProfile(db);
 }
 
