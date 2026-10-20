@@ -20,7 +20,8 @@ import type { CallContext } from '../services/llmCall.ts';
 import { describeField, flatten } from './describe.ts';
 import { callUtility, parseJsonObject } from './utility.ts';
 
-const SYSTEM = `你是角色設計師，替一款聊天模擬遊戲設計像真人一樣立體、前後一致的角色。玩家會和角色聊天、交朋友，甚至談戀愛。
+const SYSTEM = `你是角色設計師，替一款聊天模擬遊戲設計像真人一樣立體、前後一致的角色。
+遊戲的使用者（下稱「玩家」）會先描述想要的角色，再用通訊軟體和角色聊天、交朋友，甚至談戀愛。你要設計的是角色本身，不是玩家。
 角色一律是成年人（18 歲以上）。只輸出 JSON。`;
 
 const RULES = `# 要求
@@ -69,11 +70,13 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
     const known = PERSONA_PATHS.filter((p) => !pending.includes(p) && isFieldFilled(persona, p));
     const regenerating = pending.filter((p) => isFieldFilled(base, p));
     const content = [
-      '# 角色',
+      '# 要設計的角色',
       `名字：${name || '（還沒決定，請一併取一個名字）'}`,
       `簡介：${bio || '（還沒寫，請一併寫一句簡介）'}`,
-      input.seed ? `玩家的描述：${input.seed}` : '',
-      input.userStage ? `和玩家的關係：${STAGE_LABELS[input.userStage]}（「和玩家的關係」與稱呼要符合這個程度，不要寫成更熟或更陌生）` : '',
+      input.seed ? `\n## 角色概念（玩家對這個角色的要求，描述的是角色本身，不是玩家）\n${input.seed}` : '',
+      input.userStage
+        ? `\n## 這個角色和玩家的關係\n目前是「${STAGE_LABELS[input.userStage]}」。relationship 區塊（認識經過、怎麼稱呼玩家）要符合這個程度，不要寫成更熟或更陌生。`
+        : '',
       references ? `\n${references}` : '',
       '',
       '# 已經確定的設定（不能改，新內容必須和這些一致）',

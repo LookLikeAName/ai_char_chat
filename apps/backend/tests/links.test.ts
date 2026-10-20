@@ -179,19 +179,19 @@ describe.skipIf(!url)('相關的角色', () => {
     expect(calls[0]).toContain('# 相關的角色（已經存在，新的設定要和他們一致）');
     expect(calls[0]).toContain('### 林小雨');
     expect(calls[0]).toContain('你們的關係：同一間設計公司的同事（朋友）');
-    expect(calls[0]).toContain('和玩家的關係：好友（');
+    expect(calls[0]).toContain('## 這個角色和玩家的關係\n目前是「好友」');
     expect(calls[0]).toContain(`住在：${SAMPLE_PERSONA.basic.location}`);
     expect(calls[0]).toContain('# 和相關的角色');
 
     await checkPersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references, userStage: 'friend' });
     expect(calls.at(-1)).toContain('### 林小雨');
-    expect(calls.at(-1)).toContain('和玩家目前的關係：朋友');
+    expect(calls.at(-1)).toContain('目前的關係：朋友');
     expect(calls.at(-1)).toContain('也要檢查和相關的角色有沒有對不上的地方');
 
     calls.length = 0;
     await generatePersona(ctx, settings, { name: '阿哲', bio: '', persona: {}, locks: [], references: [], only: ['basic.age'] });
     expect(calls[0]).not.toContain('相關的角色');
-    expect(calls[0]).not.toContain('和玩家的關係：');
+    expect(calls[0]).not.toContain('這個角色和玩家的關係');
   });
 
   it('聊天時：一對一列出認識的人，群組成員旁邊寫出關係', async () => {

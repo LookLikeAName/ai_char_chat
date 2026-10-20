@@ -97,7 +97,7 @@ export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full'): strin
       p.speech?.tone ? `說話：${p.speech.tone}` : '',
       b.lifeEvents?.length ? `經歷：${b.lifeEvents.join('；')}` : '',
       day ? `平日作息：${day}` : '',
-      p.relationship?.withUser ? `和玩家的關係：${p.relationship.withUser}` : '',
+      p.relationship?.withUser ? `他和玩家的關係（「對方」指玩家）：${p.relationship.withUser}` : '',
     );
   } else {
     lines.push(p.personality?.traits?.length ? `個性：${p.personality.traits.join('、')}` : '');

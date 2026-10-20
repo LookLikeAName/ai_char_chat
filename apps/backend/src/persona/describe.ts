@@ -39,9 +39,22 @@ export function describeFieldType(meta: FieldMeta): string {
   }
 }
 
+/**
+ * 給 LLM 看的欄位名稱：介面上對玩家說「你」，但模型會搞不清楚「你」是誰，
+ * 這裡改寫成明確的說法（玩家在角色設定裡一律稱為「對方」）。
+ */
+const LLM_FIELD_TEXT: Partial<Record<PersonaPath, { label: string; hint: string }>> = {
+  'relationship.withUser': {
+    label: '這個角色和玩家的初始關係與認識經過',
+    hint: '從這個角色的角度寫，用「對方」指玩家，例如「對方是常來店裡的熟客，最近開始會在打烊後聊天」',
+  },
+  'relationship.callsUser': { label: '這個角色怎麼稱呼玩家', hint: '暱稱或稱謂，例如「老客人」「學長」' },
+};
+
 export function describeField(path: PersonaPath): string {
   const meta = fieldMeta(path)!;
-  return `- ${path}（${meta.label}）：${describeFieldType(meta)}${meta.hint ? `。說明：${meta.hint}` : ''}`;
+  const text = LLM_FIELD_TEXT[path] ?? { label: meta.label, hint: meta.hint };
+  return `- ${path}（${text.label}）：${describeFieldType(meta)}${text.hint ? `。說明：${text.hint}` : ''}`;
 }
 
 function level(v: number): string {

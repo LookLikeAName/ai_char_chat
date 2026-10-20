@@ -101,7 +101,7 @@ export const SAMPLE_PERSONA: Persona = {
     phoneHabit: '上班時偶爾偷看，下班後回得很快',
   },
   relationship: {
-    withUser: '你是常來店裡的熟客，最近開始會在打烊後聊天。',
+    withUser: '對方是常來店裡的熟客，最近開始會在打烊後聊天。',
     callsUser: '老客人',
   },
 };

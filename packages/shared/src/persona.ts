@@ -336,7 +336,7 @@ export const PERSONA_SECTIONS: SectionMeta[] = [
     key: 'relationship',
     label: '和你的關係',
     fields: {
-      withUser: { label: '初始關係與認識經過', type: 'long', hint: '例如：大學社團學長、常去的咖啡店店員' },
+      withUser: { label: '初始關係與認識經過', type: 'long', hint: '用「對方」指你，例如：對方是大學社團的學弟、對方是常來店裡的熟客' },
       callsUser: { label: '怎麼稱呼你', type: 'text' },
     },
   },

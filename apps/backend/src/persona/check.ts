@@ -27,7 +27,7 @@ export async function checkPersona(
   const locks = new Set(input.locks);
   const references = await referenceSection(ctx.db, input.references ?? []);
   const content = `# 角色：${input.name || '（未命名）'}
-簡介：${input.bio || '（沒有）'}${input.userStage ? `\n和玩家目前的關係：${STAGE_LABELS[input.userStage]}（「和玩家的關係」寫得比這更熟或更陌生也算矛盾）` : ''}
+簡介：${input.bio || '（沒有）'}${input.userStage ? `\n這個角色和玩家（會和角色聊天的遊戲使用者）目前的關係：${STAGE_LABELS[input.userStage]}（relationship 區塊寫得比這更熟或更陌生也算矛盾）` : ''}
 
 # 設定
 ${JSON.stringify(flatten(draft as never, PERSONA_PATHS), null, 1)}

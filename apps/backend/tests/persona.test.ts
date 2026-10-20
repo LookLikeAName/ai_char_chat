@@ -62,7 +62,7 @@ describe('回覆 prompt 使用完整人格', () => {
       now: new Date('2026-10-19T03:00:00Z'), // 週一 台北 11:00
     });
     expect(prompt).toContain('## 價值觀與目標');
-    expect(prompt).toContain('你是常來店裡的熟客');
+    expect(prompt).toContain('對方是常來店裡的熟客');
     expect(prompt).toContain('你稱呼對方「老客人」');
     expect(prompt).toContain('你現在大概在：顧店（忙碌）');
   });
@@ -184,7 +184,7 @@ describe('generatePersona', () => {
     const ctx = fakeCtx([JSON.stringify({ persona: SAMPLE_PERSONA })], calls);
     const res = await generatePersona(ctx, settings, { name: '小雨', bio: 'x', persona: {}, locks: [], seed: '毒舌店長' });
     expect(res.filled).toHaveLength(PERSONA_PATHS.length);
-    expect(calls[0]).toContain('玩家的描述：毒舌店長');
+    expect(calls[0]).toContain('## 角色概念（玩家對這個角色的要求，描述的是角色本身，不是玩家）\n毒舌店長');
   });
 
   it('沒有設定系統工具模型時提示去設定', async () => {
