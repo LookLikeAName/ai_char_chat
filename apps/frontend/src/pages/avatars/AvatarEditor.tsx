@@ -304,7 +304,7 @@ function UserRelationCard({
             {stages}
           </select>
           <span className="hint">
-            決定一開始的好感與信任。AI 補完會照這個程度寫下面人格設定裡的「和你的關係」，例如選「朋友」就不會寫成剛認識。建立後也可以在這裡或聊天的資訊面板重設。
+            決定一開始的好感、信任與心動。也可以一開始就是曖昧、戀人或前任。AI 補完會照這個程度寫下面人格設定裡的「和你的關係」，例如選「朋友」就不會寫成剛認識。建立後也可以在這裡或聊天的資訊面板重設。
           </span>
         </label>
       </section>
@@ -320,6 +320,7 @@ function UserRelationCard({
           <span className="hint">
             {' '}
             好感 {state.relationship.affinity}、信任 {state.relationship.trust}
+            {state.relationship.romance ? `、心動 ${state.relationship.romance}` : ''}
           </span>
         </p>
       ) : (

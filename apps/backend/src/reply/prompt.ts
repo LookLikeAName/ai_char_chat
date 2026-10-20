@@ -1,12 +1,17 @@
 // 組出一對一回覆的 prompt。順序：角色設定（固定，利於快取）→ 規則 → 現在的情境 → 對話紀錄。
 import {
+  canHaveCrush,
   currentBlock,
   ENUM_OPTIONS,
+  EVENT_HINTS,
   eventsSoFar,
   localClock,
   personaSchema,
   romanceGuidance,
+  romanceOpen,
+  romanceTier,
   ROMANCE_PREFS,
+  ROMANTIC_STAGES,
   STAGE_GUIDANCE,
   STAGE_LABELS,
   type AppSettings,
@@ -18,6 +23,8 @@ import {
   type PhotoAppears,
   type PersonaDraft,
   type Preferences,
+  type RelationshipEventRecord,
+  type RelationshipEventType,
   type RelationshipState,
   type SeenReason,
   type Stage,
@@ -93,6 +100,8 @@ export interface PromptUser {
 /** avatar 的動態狀態（第 5 階段） */
 export interface PromptState {
   relationship: RelationshipState;
+  /** 關係事件（判斷告白是否在等回答、是否剛被拒絕） */
+  events?: RelationshipEventRecord[];
   mood: Mood;
   /** 依相關度挑出的記憶；visibility：private（私訊得知）、group:<id>、public */
   memories: { content: string; createdAt: Date; visibility?: string }[];
@@ -183,6 +192,8 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
   const { avatar, settings, now, history, user, state, situation, lifeLog, group, photos, acquaintances } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
+  // 戀愛的部分：數值夠、對方也沒說只想當朋友時才放給 LLM
+  const romance = !!state && romanceOpen(state.relationship, user?.preferences.romance);
   // 玩家最新這串訊息之前的最後一則（通常是 avatar 上次說的話）
   let i = history.length - 1;
   while (i >= 0 && history[i]!.senderType === 'user') i--;
@@ -215,7 +226,7 @@ ${avatar.bio || '（沒有額外描述）'}
 ${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
 # 你和對方
 ${relationship}
-${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}${acquaintanceSection(acquaintances, group)}
+${state ? `\n${stateSection(state, user, now, settings.timezone, group, persona)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}${acquaintanceSection(acquaintances, group)}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
 - 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
@@ -226,15 +237,21 @@ ${state ? `\n${stateSection(state, user, now, settings.timezone, group)}\n` : ''
 - ${content}
 
 # 現在
-現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity, !!group)}
+現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity, !!group, romance && state ? romanceTopics(state.relationship) : '')}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
-{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3, "relationship_event": null${group ? ', "others_affinity": {}' : ''}}` : '}'}${
+{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3${romance ? ', "romance_delta": -3～3' : ''}, "relationship_event": null${group ? ', "others_affinity": {}' : ''}}` : '}'}${
     state
       ? `
-${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。
-- relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：mutual_feelings（彼此有了好感、開始曖昧）、confession_accepted（接受告白、開始交往）、confession_rejected（拒絕告白）、conflict（吵架）、reconciled（和好）、breakup（分手）。`
+${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。${
+          romance
+            ? '\n- romance_delta：這段互動讓你對對方心動了多少（戀愛方面的感覺，和好感不同）：被撩到、心跳加速、覺得對方很有魅力就 +；只是朋友般的愉快就是 0；被冷落、對方提到喜歡別人就 -。對方不是你會喜歡的類型（例如性傾向不合）時不會增加。'
+            : ''
+        }
+- relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：${possibleEvents(state.relationship, romance)
+          .map((e) => `${e}（${EVENT_HINTS[e]}）`)
+          .join('、')}。`
       : ''
   }${photos ? photoSection(photos, settings.adultContent) : ''}`;
 }
@@ -272,13 +289,40 @@ const SITUATIONS: Record<SeenReason, (activity: string, waited: string) => strin
   woken: () => '你原本在睡覺，被對方連續的訊息吵醒了。依你的個性反應（可能迷糊、有點不爽，或擔心對方出了什麼事）。',
 };
 
-function situationSection(s: PromptSituation | undefined, activity: string | undefined, inGroup = false): string {
+/** 戀愛的部分要放給 LLM 時，主動發話可以聊的戀愛話題（依關係與心動） */
+function romanceTopics(r: RelationshipState): string {
+  if (r.stage === 'lover') return '也可以說想念對方、問對方在做什麼、約下次見面。';
+  if (r.stage === 'crush') return '也可以撩一下對方、約對方出去，或藉口找對方聊天。';
+  const tier = romanceTier(r);
+  if (tier === 'like' || tier === 'confess') return '你喜歡對方，所以會想找藉口跟對方聊天，例如分享看到的東西、關心對方今天過得怎樣。';
+  return '';
+}
+
+/** 現在可能發生的關係事件（只列出這些給 LLM） */
+function possibleEvents(r: RelationshipState, romance: boolean): RelationshipEventType[] {
+  const out: RelationshipEventType[] = [];
+  if (r.stage === 'ex') {
+    if (romance) out.push('got_back_together');
+    out.push('moved_on');
+  } else if (r.stage === 'lover') {
+    out.push('breakup');
+  } else {
+    if (romance && r.stage !== 'crush' && canHaveCrush(r)) out.push('mutual_feelings');
+    if (romance && r.stage === 'crush') out.push('avatar_confessed');
+    out.push('confession_accepted', 'confession_rejected');
+    if (r.stage === 'crush') out.push('breakup');
+  }
+  out.push('conflict', 'reconciled');
+  return out;
+}
+
+function situationSection(s: PromptSituation | undefined, activity: string | undefined, inGroup = false, romanceTopic = ''): string {
   if (!s || s.mode === 'group') return '';
   if (s.mode === 'proactive' && inGroup) {
     return `\n\n## 這次的情況\n群組裡最近沒什麼人說話，你想開個話題：分享今天發生的事、問大家意見、或丟一個有趣的東西。要自然，像真的朋友群組。`;
   }
   if (s.mode === 'proactive') {
-    return `\n\n## 這次的情況\n對方現在沒有在跟你聊天，是你想主動傳訊息給對方。可以聊今天發生的事、追問對方之前提過的事、分享你看到的東西，或只是想念對方；要自然，不要像客服或制式問候。`;
+    return `\n\n## 這次的情況\n對方現在沒有在跟你聊天，是你想主動傳訊息給對方。可以聊今天發生的事、追問對方之前提過的事、分享你看到的東西，或只是想念對方；要自然，不要像客服或制式問候。${romanceTopic}`;
   }
   const waited = s.waitedMs && s.waitedMs > 5 * 60_000 ? formatGap(s.waitedMs) : '';
   const text = s.reason ? SITUATIONS[s.reason](activity ?? '', waited) : '';
@@ -340,7 +384,7 @@ ${lines.join('\n')}
 `;
 }
 
-const FAMILIAR: Stage[] = ['friend', 'close', 'crush', 'lover'];
+const FAMILIAR: Stage[] = ['friend', 'close', 'bestie', 'crush', 'lover', 'ex'];
 
 /**
  * 關於玩家的參考資料，依關係深淺逐步透露：剛認識只知道稱呼，認識之後知道偏好，成為朋友後才有整體的感覺（摘要）。
@@ -377,20 +421,45 @@ function memoryMark(visibility: string | undefined, group: PromptGroup | null | 
   return '';
 }
 
+/** 戀愛的部分：性傾向與對方的性別（讓模型判斷會不會心動） */
+function orientationLine(persona: Persona | null, user: PromptUser | null | undefined, stage: Stage): string {
+  const parts: string[] = [];
+  if (persona?.basic.orientation) parts.push(`你的性傾向：${persona.basic.orientation}`);
+  const p = user?.preferences;
+  if (p && stage !== 'stranger') {
+    if (p.gender.trim()) parts.push(`對方的性別：${p.gender.trim()}`);
+    if (p.attractedTo.trim()) parts.push(`對方喜歡的對象：${p.attractedTo.trim()}`);
+  }
+  return parts.length ? `${parts.join('；')}。對方不是你會喜歡的對象時，你不會對對方心動（但還是可以是很好的朋友）。` : '';
+}
+
 function stateSection(
   state: PromptState,
   user: PromptUser | null | undefined,
   now: Date,
   timezone: string,
-  group?: PromptGroup | null,
+  group: PromptGroup | null | undefined,
+  persona: Persona | null,
 ): string {
   const r = state.relationship;
   const romancePref = user?.preferences.romance;
+  const open = romanceOpen(r, romancePref);
   const lines = [
-    `## 你們的關係：${STAGE_LABELS[r.stage]}（好感 ${r.affinity}/100、信任 ${r.trust}/100）`,
+    `## 你們的關係：${STAGE_LABELS[r.stage]}（好感 ${r.affinity}/100、信任 ${r.trust}/100${open ? `、心動 ${r.romance ?? 0}/100` : ''}）`,
     STAGE_GUIDANCE[r.stage],
-    romanceGuidance(r),
-    romancePref === 'none' ? '對方表示只想當朋友：不要主動往戀愛發展。' : romancePref ? `對方對戀愛的態度：${ROMANCE_PREFS[romancePref]}。` : '',
+    ...(open
+      ? [
+          '',
+          '## 戀愛',
+          ...romanceGuidance(r, { events: state.events, now }),
+          romancePref ? `對方對戀愛的態度：${ROMANCE_PREFS[romancePref]}。` : '',
+          orientationLine(persona, user, r.stage),
+        ]
+      : romancePref === 'none'
+        ? ['對方表示只想當朋友：不要主動往戀愛發展；對方告白的話，依你的個性婉拒或帶過（confession_rejected）。']
+        : ROMANTIC_STAGES.includes(r.stage)
+          ? []
+          : ['以你們目前的關係，對方如果告白，你會覺得太突然而拒絕或閃避（回報 relationship_event: confession_rejected）。']),
     '',
     `## 你現在的心情：${state.mood.label}（心情 ${state.mood.valence}、精神 ${state.mood.energy}，範圍 -5～5）`,
   ];

@@ -21,6 +21,16 @@ const MAX_EVENTS = 50;
 
 export type RelationshipRow = typeof relationships.$inferSelect;
 
+/** 資料列 → 狀態；心動只有對玩家的才有 */
+export function relationshipState(row: RelationshipRow): RelationshipState {
+  return {
+    stage: row.stage,
+    affinity: row.affinity,
+    trust: row.trust,
+    ...(row.target === USER_TARGET ? { romance: row.romance } : {}),
+  };
+}
+
 /** 取得關係；還沒有時依初始階段建立 */
 export async function getRelationship(
   db: Db,
@@ -36,7 +46,8 @@ export async function getRelationship(
   const v = INITIAL_VALUES[initial];
   const [created] = await db
     .insert(relationships)
-    .values({ avatarId, target, stage: initial, ...v })
+    // 心動只追蹤對玩家的
+    .values({ avatarId, target, stage: initial, ...v, romance: target === USER_TARGET ? v.romance : 0 })
     .onConflictDoNothing()
     .returning();
   return created ?? (await getRelationship(db, avatarId, target, initial));
@@ -51,12 +62,12 @@ export async function resetRelationship(db: Db, avatarId: string, stage: Initial
 export async function applyInteraction(
   db: Db,
   avatarId: string,
-  d: { affinity?: number; trust?: number; event?: RelationshipEventType | null; note?: string },
+  d: { affinity?: number; trust?: number; romance?: number; event?: RelationshipEventType | null; note?: string },
   warmUp: 'slow' | 'medium' | 'fast' = 'medium',
   target = USER_TARGET,
 ): Promise<{ before: RelationshipState; after: RelationshipState }> {
   const row = await getRelationship(db, avatarId, target);
-  const before: RelationshipState = { stage: row.stage, affinity: row.affinity, trust: row.trust };
+  const before = relationshipState(row);
   const after = applyDeltas(before, d, warmUp);
   const events = [...row.events];
   if (d.event || after.stage !== before.stage) {

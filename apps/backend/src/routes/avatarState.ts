@@ -44,7 +44,7 @@ export async function avatarStateRoutes(app: FastifyInstance) {
     ]);
     return {
       mood,
-      relationship: { stage: rel.stage, affinity: rel.affinity, trust: rel.trust, events: rel.events },
+      relationship: { stage: rel.stage, affinity: rel.affinity, trust: rel.trust, romance: rel.romance, events: rel.events },
       impression: impression?.content ?? null,
       memories: rows.map((m) => ({
         id: m.id,

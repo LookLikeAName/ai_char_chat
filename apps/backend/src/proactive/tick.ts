@@ -5,6 +5,7 @@ import type { Db } from '../db/client.ts';
 import { avatars, avatarState, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { AgentJob } from '../jobs.ts';
 import { ensureLifeLog } from '../life/lifeLog.ts';
+import { loadProfile } from '../profile/service.ts';
 import { getRelationship } from '../relationship/service.ts';
 import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
@@ -35,6 +36,8 @@ export async function proactiveTick(
     ? await db.select().from(avatarState).where(inArray(avatarState.avatarId, rows.map((r) => r.avatar.id)))
     : [];
 
+  // 玩家只想當朋友時，心動不會讓 avatar 更常找你
+  const pref = (await loadProfile(db)).preferences?.romance;
   const decisions: TickDecision[] = [];
   for (const { avatar, conversationId } of rows) {
     const skip = (reason: string, chance?: number) => decisions.push({ avatarId: avatar.id, action: 'skipped', reason, chance });
@@ -89,6 +92,7 @@ export async function proactiveTick(
       stage: rel.stage,
       extraversion: avatar.persona.personality?.bigFive?.extraversion ?? 50,
       sinceLastMessageMs: last ? now.getTime() - last.createdAt.getTime() : null,
+      romance: pref === 'none' ? 0 : rel.romance,
     });
     if (random() >= chance) {
       skip('這次沒有想傳', chance);

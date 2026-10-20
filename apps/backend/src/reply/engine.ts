@@ -16,6 +16,7 @@ import {
   GROUP_MESSAGE_BUDGET,
   localClock,
   mentions,
+  romanceOpen,
   shownName,
   STAGE_LABELS,
   type AppSettings,
@@ -35,7 +36,7 @@ import { embedderFromSettings } from '../memory/embedder.ts';
 import { bigramSimilarity, latestImpression, retrieveMemories } from '../memory/store.ts';
 import { attachParsed, logEvent, withScope } from '../observability.ts';
 import { loadProfile } from '../profile/service.ts';
-import { applyInteraction, getMood, getRelationship, growFamiliarity, setMood } from '../relationship/service.ts';
+import { applyInteraction, getMood, getRelationship, growFamiliarity, relationshipState, setMood } from '../relationship/service.ts';
 import { callWithBinding } from '../services/llmCall.ts';
 import { QuotaError, quotaStatus } from '../services/usage.ts';
 import { postMessage } from '../services/messages.ts';
@@ -685,10 +686,14 @@ export class ReplyEngine {
     const db = this.deps.db;
     if (output.mood) await setMood(db, ctx.avatar.id, output.mood);
     const warmUp = ctx.avatar.persona.romance?.warmUpSpeed ?? 'medium';
+    // 心動只有在 prompt 放出戀愛的部分時才算（玩家只想當朋友、還不熟時模型給了也不採用）
+    const pref = (await loadProfile(db)).preferences?.romance;
+    const current = relationshipState(await getRelationship(db, ctx.avatar.id));
+    const romance = romanceOpen(current, pref) ? output.romanceDelta : 0;
     const { before, after } = await applyInteraction(
       db,
       ctx.avatar.id,
-      { affinity: output.affinityDelta, trust: output.trustDelta, event: output.event?.type, note: output.event?.note },
+      { affinity: output.affinityDelta, trust: output.trustDelta, romance, event: output.event?.type, note: output.event?.note },
       warmUp,
     );
     // 群組：對其他成員的好感
@@ -721,13 +726,19 @@ export class ReplyEngine {
       }
     }
     const changed =
-      output.mood || others.length || before.affinity !== after.affinity || before.trust !== after.trust || before.stage !== after.stage;
+      output.mood ||
+      others.length ||
+      before.affinity !== after.affinity ||
+      before.trust !== after.trust ||
+      before.romance !== after.romance ||
+      before.stage !== after.stage;
     if (changed) {
       await this.deps.events.publish({ type: 'avatar.state.changed', avatarId: ctx.avatar.id });
       const parts = [
         output.mood ? `心情：${output.mood.label}` : '',
         before.affinity !== after.affinity ? `好感 ${before.affinity} → ${after.affinity}` : '',
         before.trust !== after.trust ? `信任 ${before.trust} → ${after.trust}` : '',
+        before.romance !== after.romance ? `心動 ${before.romance} → ${after.romance}` : '',
         before.stage !== after.stage ? `關係 ${before.stage} → ${after.stage}` : '',
         output.event ? `事件：${output.event.type}` : '',
         ...others,
@@ -740,7 +751,8 @@ export class ReplyEngine {
         message: `${ctx.avatar.name}：${parts.join('、')}`,
         data: {
           mood: output.mood,
-          requested: { affinity: output.affinityDelta, trust: output.trustDelta, event: output.event },
+          requested: { affinity: output.affinityDelta, trust: output.trustDelta, romance: output.romanceDelta, event: output.event },
+          romanceUsed: romance,
           before,
           after,
           warmUp,
@@ -805,7 +817,8 @@ export class ReplyEngine {
         ? { preferences: profile.preferences, summary: profile.summary, results: profile.results }
         : null,
       state: {
-        relationship: { stage: relationship.stage, affinity: relationship.affinity, trust: relationship.trust },
+        relationship: relationshipState(relationship),
+        events: relationship.events,
         mood,
         memories,
         impression: impression?.content ?? null,
@@ -846,7 +859,8 @@ export class ReplyEngine {
       allowEmpty,
       notes: {
         situation,
-        relationship: { stage: relationship.stage, affinity: relationship.affinity, trust: relationship.trust },
+        relationship: relationshipState(relationship),
+        romanceOpen: romanceOpen(relationshipState(relationship), profile.preferences?.romance),
         mood,
         memories: memories.length,
         embedder: embedder?.model ?? null,

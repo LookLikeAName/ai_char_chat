@@ -126,4 +126,9 @@ describe('proactiveChance', () => {
     expect(p('friend', 90, 5)).toBeGreaterThan(p('friend', 10, 5));
     expect(p('friend', 50, 30)).toBeGreaterThan(p('friend', 50, 5));
   });
+  it('越心動越常主動找對方（最多兩倍）', () => {
+    const p = (romance: number) => proactiveChance({ availability: free, stage: 'friend', extraversion: 50, sinceLastMessageMs: 5 * 3_600_000, romance });
+    expect(p(50)).toBeCloseTo(p(0) * 1.5);
+    expect(p(300)).toBeCloseTo(p(0) * 2);
+  });
 });

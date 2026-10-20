@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NEUTRAL_MOOD, preferencesSchema } from '@acc/shared';
 import { ApiEmbedder } from '../src/memory/embedder.ts';
 import { bigramSimilarity } from '../src/memory/store.ts';
 import { parseReplyOutput } from '../src/reply/output.ts';
@@ -74,12 +75,52 @@ describe('prompt：關係、心情、記憶', () => {
       now,
     });
     expect(prompt).toContain('## 你們的關係：朋友（好感 40/100、信任 30/100）');
-    expect(prompt).toContain('太突然');
     expect(prompt).toContain('對方表示只想當朋友');
+    expect(prompt).not.toContain('## 戀愛');
+    expect(prompt).not.toContain('romance_delta');
     expect(prompt).toContain('## 你現在的心情：有點累');
     expect(prompt).toContain('他看起來很穩重。');
     expect(prompt).toContain('- 10/16（3 天前）：阿明說下週要去爬合歡山');
     expect(prompt).toContain('"affinity_delta": -3～3');
+  });
+});
+
+describe('prompt：戀愛的部分數值夠才放出', () => {
+  const user = (romance: 'none' | 'open' | null) => ({
+    preferences: preferencesSchema.parse({ nickname: '阿明', gender: '男', attractedTo: '女生', romance }),
+    summary: '',
+    results: { bigFive: null, attachment: null, values: null },
+  });
+  const build = (relationship: object, romance: 'none' | 'open' | null = 'open', mode: 'reply' | 'proactive' = 'reply') =>
+    buildSystemPrompt({
+      avatar: { name: '小雨', bio: '', persona: SAMPLE_PERSONA },
+      user: user(romance),
+      state: { relationship: { stage: 'friend', affinity: 40, trust: 30, romance: 0, ...relationship } as never, mood: NEUTRAL_MOOD, memories: [], impression: null },
+      situation: { mode },
+      settings: { timezone: 'Asia/Taipei', adultContent: false },
+      history: [],
+      now: new Date('2026-10-19T04:00:00Z'),
+    });
+
+  it('好感太低時不放出，對方告白會覺得太突然', () => {
+    const p = build({ affinity: 10 });
+    expect(p).not.toContain('## 戀愛');
+    expect(p).toContain('太突然');
+    expect(p).not.toContain('mutual_feelings');
+  });
+  it('放出時附上心動、性傾向與對方的性別；可能的事件依關係列出', () => {
+    const p = build({ affinity: 50, romance: 40 });
+    expect(p).toContain('心動 40/100');
+    expect(p).toContain(`你的性傾向：${SAMPLE_PERSONA.basic.orientation}`);
+    expect(p).toContain('對方的性別：男');
+    expect(p).toContain('對方喜歡的對象：女生');
+    expect(p).toContain('mutual_feelings（彼此有了好感');
+    expect(p).not.toContain('avatar_confessed');
+  });
+  it('曖昧中主動發話會帶戀愛話題；戀人可以分手、前任可以復合', () => {
+    expect(build({ stage: 'crush', affinity: 60, trust: 50, romance: 50 }, 'open', 'proactive')).toContain('約對方出去');
+    expect(build({ stage: 'lover', affinity: 70, trust: 60, romance: 70 })).toContain('breakup（分手）');
+    expect(build({ stage: 'ex', affinity: 30, trust: 30, romance: 40 })).toContain('got_back_together');
   });
 });
 

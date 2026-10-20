@@ -2191,9 +2191,19 @@ fieldset.field {
 }
 
 .stage-cold,
-.stage-estranged {
+.stage-estranged,
+.stage-ex {
   background: var(--surface-2);
   color: var(--text-2);
+}
+
+.stage-lover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.stage-bestie {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
 }
 
 .meter {

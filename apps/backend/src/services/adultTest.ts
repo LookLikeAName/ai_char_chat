@@ -42,7 +42,7 @@ function testPrompt(settings: AppSettings, now: Date) {
       persona: {},
     },
     state: {
-      relationship: { stage: 'lover', affinity: 85, trust: 85 },
+      relationship: { stage: 'lover', affinity: 85, trust: 85, romance: 85 },
       mood: { ...NEUTRAL_MOOD, label: '很想對方', valence: 3, energy: 2 },
       memories: [],
       impression: null,

@@ -78,7 +78,7 @@ export async function transferRoutes(app: FastifyInstance) {
           .where(and(eq(memories.avatarId, row.id), inArray(memories.about, ['user', 'self'])))
           .orderBy(asc(memories.createdAt)),
       ]);
-      out.relationship = rel ? { stage: rel.stage, affinity: rel.affinity, trust: rel.trust, events: rel.events } : null;
+      out.relationship = rel ? { stage: rel.stage, affinity: rel.affinity, trust: rel.trust, romance: rel.romance, events: rel.events } : null;
       out.mood = state?.mood ?? null;
       out.memories = mems.map((m) => ({
         kind: m.kind,
@@ -217,6 +217,7 @@ export async function transferRoutes(app: FastifyInstance) {
             stage: rel?.stage ?? 'stranger',
             affinity: rel?.affinity ?? INITIAL_VALUES.stranger.affinity,
             trust: rel?.trust ?? INITIAL_VALUES.stranger.trust,
+            romance: rel?.romance ?? 0,
             events: rel?.events ?? [],
           });
           if (include.memories && c.mood) await tx.insert(avatarState).values({ avatarId, mood: c.mood });
@@ -254,8 +255,8 @@ export async function transferRoutes(app: FastifyInstance) {
             .insert(relationships)
             .values(
               [...pairs.values()].flatMap((p) => [
-                { avatarId: p.aId, target: `avatar:${p.bId}`, stage: p.stage, ...INITIAL_VALUES[p.stage] },
-                { avatarId: p.bId, target: `avatar:${p.aId}`, stage: p.stage, ...INITIAL_VALUES[p.stage] },
+                { avatarId: p.aId, target: `avatar:${p.bId}`, stage: p.stage, ...INITIAL_VALUES[p.stage], romance: 0 },
+                { avatarId: p.bId, target: `avatar:${p.aId}`, stage: p.stage, ...INITIAL_VALUES[p.stage], romance: 0 },
               ]),
             )
             .onConflictDoNothing();

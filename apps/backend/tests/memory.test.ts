@@ -217,6 +217,46 @@ describe.skipIf(!url)('記憶與關係', () => {
       expect(rel.events.at(-1)).toMatchObject({ type: 'confession_accepted', note: '他告白了' });
     });
 
+    it('心動：玩家沒說只想當朋友、有一點好感時才放給 LLM，也才採用模型給的變化', async () => {
+      await db.insert(relationships).values({ avatarId, target: 'user', stage: 'friend', affinity: 40, trust: 30, romance: 10 });
+      await savePreferences(db, preferencesSchema.parse({ nickname: '阿明', romance: 'open' }));
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '今天的你特別好看' });
+      replies = [JSON.stringify({ messages: ['講什麼啦'], romance_delta: 3 })];
+      await engine([], []).handle(conversationId);
+      // 慢熱：+3 × 0.6 → +2
+      expect((await getRelationship(db, avatarId)).romance).toBe(12);
+      const prompt = prompts[0].messages[0].content as string;
+      expect(prompt).toContain('心動 10/100');
+      expect(prompt).toContain('"romance_delta": -3～3');
+
+      await savePreferences(db, preferencesSchema.parse({ nickname: '阿明', romance: 'none' }));
+      prompts = [];
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '真的' });
+      replies = [JSON.stringify({ messages: ['好啦'], romance_delta: 3 })];
+      await engine([], []).handle(conversationId, { force: true });
+      expect((await getRelationship(db, avatarId)).romance).toBe(12);
+      expect(prompts[0].messages[0].content).not.toContain('romance_delta');
+    });
+
+    it('曖昧、數值夠時可以主動告白；告白後記下，下次 prompt 知道在等回答；答應了變成戀人', async () => {
+      await db.insert(relationships).values({ avatarId, target: 'user', stage: 'crush', affinity: 65, trust: 50, romance: 60 });
+      await savePreferences(db, preferencesSchema.parse({ nickname: '阿明', romance: 'eager' }));
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '晚安' });
+      replies = [JSON.stringify({ messages: ['等一下…', '我好像喜歡上你了'], relationship_event: { type: 'avatar_confessed', note: '睡前告白' } })];
+      await engine([], []).handle(conversationId);
+      expect(prompts[0].messages[0].content).toContain('avatar_confessed');
+      const rel = await getRelationship(db, avatarId);
+      expect(rel).toMatchObject({ stage: 'crush', romance: 63 });
+      expect(rel.events.at(-1)).toMatchObject({ type: 'avatar_confessed' });
+
+      prompts = [];
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '我也喜歡你' });
+      replies = [JSON.stringify({ messages: ['真的嗎！'], relationship_event: { type: 'confession_accepted', note: '在一起了' } })];
+      await engine([], []).handle(conversationId, { force: true });
+      expect(prompts[0].messages[0].content).toContain('正在等對方的回答');
+      expect((await getRelationship(db, avatarId)).stage).toBe('lover');
+    });
+
     it('相關的記憶會放進 prompt', async () => {
       await addMemories(db, null, [{ avatarId, kind: 'event', content: '對方下週二要去面試', importance: 8 }]);
       await db.insert(messages).values({ conversationId, senderType: 'user', content: '面試結束了！' });

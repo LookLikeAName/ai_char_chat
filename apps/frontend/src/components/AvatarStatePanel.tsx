@@ -97,6 +97,8 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
         <span className={`stage stage-${state.relationship.stage}`}>{STAGE_LABELS[state.relationship.stage]}</span>
         <Meter label="好感" value={state.relationship.affinity} min={-100} max={100} />
         <Meter label="信任" value={state.relationship.trust} min={0} max={100} />
+        {/* 心動：有一點點以後才出現 */}
+        {(state.relationship.romance ?? 0) > 0 && <Meter label="心動" value={state.relationship.romance ?? 0} min={0} max={100} />}
         {events.length > 0 && (
           <ul className="rel-events">
             {events.map((e, i) => (

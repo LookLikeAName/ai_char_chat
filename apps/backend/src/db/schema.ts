@@ -274,6 +274,8 @@ export const relationships = pgTable(
     stage: text('stage').$type<Stage>().notNull(),
     affinity: integer('affinity').notNull(),
     trust: integer('trust').notNull(),
+    /** 心動 0～100：戀愛方面的感覺，只追蹤對玩家的 */
+    romance: integer('romance').notNull().default(0),
     events: jsonb('events').$type<RelationshipEventRecord[]>().notNull().default([]),
     /** avatar 之間：在群組裡一起聊天、自然變熟的次數（當地日期與當天已經算了幾次） */
     familiarity: jsonb('familiarity').$type<{ day: string; count: number }>(),

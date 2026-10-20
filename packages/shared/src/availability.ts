@@ -172,8 +172,10 @@ const STAGE_FACTOR: Record<Stage, number> = {
   acquaintance: 0.5,
   friend: 1,
   close: 1.3,
+  bestie: 1.5,
   crush: 1.6,
   lover: 2,
+  ex: 0.3,
   cold: 0.15,
   estranged: 0,
 };
@@ -185,6 +187,8 @@ export interface ProactiveInput {
   extraversion: number;
   /** 距離這個對話最後一則訊息多久（毫秒）；沒有任何訊息時為 null */
   sinceLastMessageMs: number | null;
+  /** 心動 0～100：越喜歡對方越常主動找對方（最多兩倍） */
+  romance?: number;
 }
 
 /** 每 15 分鐘檢查一次時，這一次主動傳訊息的機率 */
@@ -196,7 +200,8 @@ export function proactiveChance(i: ProactiveInput): number {
   // 剛聊完不會馬上又找你；很久沒聊會比較想找你
   const silence = h < 1 ? 0 : h < 4 ? 0.8 : h < 24 ? 1.5 : 2;
   const status = i.availability.status === 'busy' ? 0.3 : 1;
-  return Math.min(0.5, base * personality * STAGE_FACTOR[i.stage] * silence * status);
+  const romance = 1 + Math.min(100, Math.max(0, i.romance ?? 0)) / 100;
+  return Math.min(0.5, base * personality * STAGE_FACTOR[i.stage] * romance * silence * status);
 }
 
 // ---------- 生活日誌 ----------

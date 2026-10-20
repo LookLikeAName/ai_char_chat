@@ -49,6 +49,7 @@ export const avatarCardSchema = z.object({
       stage: z.enum(STAGES),
       affinity: z.number().int().min(-100).max(100),
       trust: z.number().int().min(0).max(100),
+      romance: z.number().int().min(0).max(100).default(0),
       events: z
         .array(
           z.object({

@@ -9,6 +9,8 @@ export interface ReplyOutput {
   mood?: Mood;
   affinityDelta: number;
   trustDelta: number;
+  /** 心動的變化；只有 prompt 有要求時才會有 */
+  romanceDelta: number;
   event: { type: RelationshipEventType; note: string } | null;
   /** 群組：對其他成員的好感變化（名字 → 變化量） */
   othersAffinity: Record<string, number>;
@@ -30,6 +32,7 @@ const outputSchema = z.object({
   mood: z.unknown().optional(),
   affinity_delta: z.unknown().optional(),
   trust_delta: z.unknown().optional(),
+  romance_delta: z.unknown().optional(),
   relationship_event: z.unknown().optional(),
   photo: z.unknown().optional(),
   others_affinity: z.unknown().optional(),
@@ -94,6 +97,7 @@ export function parseReplyOutput(text: string, opts: { allowEmpty?: boolean } = 
     mood: mood.success ? mood.data : undefined,
     affinityDelta: delta(parsed.data.affinity_delta),
     trustDelta: delta(parsed.data.trust_delta),
+    romanceDelta: delta(parsed.data.romance_delta),
     event: parseEvent(parsed.data.relationship_event),
     othersAffinity: othersAffinity(parsed.data.others_affinity),
     photo,
@@ -108,5 +112,5 @@ export function plainTextFallback(text: string): ReplyOutput | null {
   const t = text.trim();
   if (!t || /[{}[\]]/.test(t.slice(0, 2)) || /"messages"\s*:/.test(t)) return null;
   const messages = clean(t.split(/\n\s*\n/));
-  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, event: null, othersAffinity: {}, photo: null } : null;
+  return messages.length ? { innerThought: '', messages, affinityDelta: 0, trustDelta: 0, romanceDelta: 0, event: null, othersAffinity: {}, photo: null } : null;
 }
