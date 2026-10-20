@@ -1,6 +1,6 @@
 // 每天的生活日誌：依作息與人格設定，替 avatar 編出「今天會發生的幾件事」。
 import { and, eq } from 'drizzle-orm';
-import { localClock, type AppSettings, type LifeLogEvent } from '@acc/shared';
+import { localClock, utilityBinding, type AppSettings, type LifeLogEvent } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, lifeLogs } from '../db/schema.ts';
 import { renderPersona } from '../persona/describe.ts';
@@ -28,7 +28,7 @@ export async function ensureLifeLog(
 ): Promise<LifeLogEvent[] | null> {
   const { date, weekend } = localClock(now, settings.timezone);
   const existing = await getLifeLog(ctx.db, avatar.id, date);
-  if (existing || !settings.utilityLlm) return existing;
+  if (existing || !utilityBinding(settings, 'life')) return existing;
   const persona = completePersona(avatar.persona);
   if (!persona) return null;
 

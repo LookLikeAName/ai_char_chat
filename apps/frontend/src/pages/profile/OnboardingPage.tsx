@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
-import { INSTRUMENTS, progress, type InstrumentId, type ProfileDto } from '@acc/shared';
+import { INSTRUMENTS, progress, utilityBinding, type InstrumentId, type ProfileDto } from '@acc/shared';
 import { PreferencesForm } from '../../components/profile/PreferencesForm.tsx';
 import { Questionnaire } from '../../components/profile/Questionnaire.tsx';
 import { useAnswers } from '../../components/profile/useAnswers.ts';
@@ -34,6 +34,7 @@ function Onboarding({ profile }: { profile: ProfileDto }) {
   const [step, setStep] = useState<Step>(profile.preferences ? 'bigFive' : 'intro');
   const { answers, answer, sync } = useAnswers(profile.answers);
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
+  const canSummarize = !!settings && !!utilityBinding(settings, 'summary');
   const { data: allProfiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
   const llmProfiles = allProfiles.filter((p) => p.kind === 'chat');
   const idx = STEPS.indexOf(step);
@@ -61,10 +62,10 @@ function Onboarding({ profile }: { profile: ProfileDto }) {
     onError: (err) => toast(`摘要沒能產生：${errorText(err)}`, 'error'),
   });
   useEffect(() => {
-    if (step === 'done' && settings?.utilityLlm && !profile.summary && !summary.isPending && !summary.isSuccess) {
+    if (step === 'done' && canSummarize && !profile.summary && !summary.isPending && !summary.isSuccess) {
       summary.mutate();
     }
-  }, [step, settings?.utilityLlm, profile.summary, summary]);
+  }, [step, canSummarize, profile.summary, summary]);
 
   const instrument = step === 'bigFive' || step === 'attachment' || step === 'values' ? INSTRUMENTS[step] : null;
   const complete = instrument ? progress(instrument.id, answers[instrument.id]).answered === instrument.items.length : false;

@@ -6,9 +6,12 @@ import {
   PACING_LABELS,
   PROFILE_KIND_LABELS,
   PROVIDER_LABELS,
+  UTILITY_TASK_LABELS,
+  UTILITY_TASKS,
   type AppSettings,
   type LlmProfileDto,
   type ReplyPacing,
+  type UtilityTask,
 } from '@acc/shared';
 import { AdultTestPanel } from '../../components/AdultTestPanel.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
@@ -172,6 +175,12 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
         <h2>系統工具模型</h2>
         <p className="hint">負責補完 avatar 設定、整理記憶、產生生活日誌與測驗摘要。建議選便宜、快速的模型。</p>
         <LlmBindingEditor value={s.utilityLlm} onChange={(utilityLlm) => patch({ utilityLlm })} />
+        <UtilityTasks
+          value={s.utilityByTask}
+          onChange={(utilityByTask) => patch({ utilityByTask })}
+          profiles={profiles.filter((p) => p.kind === 'chat')}
+          fallback={profiles.find((p) => p.id === s.utilityLlm?.profileId)}
+        />
       </section>
 
       <section className="card">
@@ -329,6 +338,54 @@ function NotificationToggle() {
 }
 
 /** 選一個「圖片生成」或「記憶嵌入」用的設定檔；模型就是設定檔裡的模型 */
+/** 依功能指定系統工具模型；沒指定的用上面的預設 */
+function UtilityTasks({
+  value,
+  onChange,
+  profiles,
+  fallback,
+}: {
+  value: AppSettings['utilityByTask'];
+  onChange: (v: AppSettings['utilityByTask']) => void;
+  profiles: LlmProfileDto[];
+  fallback: LlmProfileDto | undefined;
+}) {
+  const custom = UTILITY_TASKS.filter((t) => value[t]).length;
+  const set = (task: UtilityTask, profileId: string) => {
+    const next = { ...value };
+    if (profileId) next[task] = { profileId, params: value[task]?.profileId === profileId ? value[task]!.params : {} };
+    else delete next[task];
+    onChange(next);
+  };
+  return (
+    <details className="utility-tasks" open={custom > 0}>
+      <summary>依功能指定模型{custom ? `（已指定 ${custom} 項）` : ''}</summary>
+      <p className="hint">例如補完角色用好一點的模型、摘要與記憶用便宜的。沒有指定的用上面的預設模型，參數用設定檔的預設值。</p>
+      {UTILITY_TASKS.map((task) => {
+        const picked = profiles.find((p) => p.id === value[task]?.profileId);
+        const used = picked ?? fallback;
+        return (
+          <label key={task} className="field">
+            <span className="field-label">{UTILITY_TASK_LABELS[task].title}</span>
+            <select value={value[task]?.profileId ?? ''} onChange={(e) => set(task, e.target.value)}>
+              <option value="">跟預設一樣{fallback ? `（${fallback.name}）` : ''}</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}（{p.model}）
+                </option>
+              ))}
+            </select>
+            <span className="hint">
+              {UTILITY_TASK_LABELS[task].hint}
+              {task === 'caption' && used && !used.vision && <span className="warn-text">。「{used.name}」看不懂圖片，不會替圖片寫描述。</span>}
+            </span>
+          </label>
+        );
+      })}
+    </details>
+  );
+}
+
 function ProfilePicker({
   label,
   kind,

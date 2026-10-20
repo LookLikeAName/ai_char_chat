@@ -3324,3 +3324,21 @@ fieldset.field {
   margin-top: 6px;
   border-radius: 8px;
 }
+
+.utility-tasks {
+  margin-top: 12px;
+}
+
+.utility-tasks > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.utility-tasks[open] > summary {
+  margin-bottom: 8px;
+}
+
+.utility-tasks .field + .field {
+  margin-top: 14px;
+}

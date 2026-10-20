@@ -1,6 +1,7 @@
 // 處理所有延遲工作：avatar 回覆、記憶萃取、定期整理印象。
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import { utilityBinding } from '@acc/shared';
 import { loadConfig } from './config.ts';
 import { SecretBox } from './crypto.ts';
 import { createDb } from './db/client.ts';
@@ -80,7 +81,7 @@ async function maintenance() {
     return 0;
   });
   if (removed) console.log(`[worker] 刪除 ${removed} 個沒有用到的聊天圖片`);
-  if (!settings.utilityLlm) return;
+  if (!utilityBinding(settings, 'memory')) return;
   const embedder = await embedderFromSettings(db, box, settings).catch(() => null);
   for (const a of await db.select({ id: avatars.id }).from(avatars)) {
     try {

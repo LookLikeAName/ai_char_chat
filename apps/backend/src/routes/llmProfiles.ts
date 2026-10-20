@@ -7,6 +7,7 @@ import {
   PROFILE_KINDS,
   PROVIDER_TYPES,
   resolveParams,
+  utilityProfileIds,
   type LlmParams,
   type ProfileKind,
 } from '@acc/shared';
@@ -115,7 +116,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const used = (await profileUsage(db)).get(id) ?? 0;
     if (used) throw new HttpError(409, `還有 ${used} 個 avatar 綁定這個設定檔，請先改綁其他設定檔`);
     const settings = await loadSettings(db);
-    if (settings.utilityLlm?.profileId === id) throw new HttpError(409, '系統工具模型正在使用這個設定檔');
+    if (utilityProfileIds(settings).includes(id)) throw new HttpError(409, '系統工具模型正在使用這個設定檔');
     if (settings.embedding?.profileId === id) throw new HttpError(409, '記憶的嵌入模型正在使用這個設定檔');
     if (settings.imageGen?.profileId === id) throw new HttpError(409, '頭像與照片生成正在使用這個設定檔');
     await db.delete(llmProfiles).where(eq(llmProfiles.id, id));
@@ -163,7 +164,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const avatarsUsing = (await profileUsage(db)).get(id) ?? 0;
     if (avatarsUsing) return `還有 ${avatarsUsing} 個 avatar 綁定`;
     const s = await loadSettings(db);
-    if (s.utilityLlm?.profileId === id) return '是系統工具模型';
+    if (utilityProfileIds(s).includes(id)) return '是系統工具模型';
     if (s.imageGen?.profileId === id) return '正用在頭像與照片生成';
     if (s.embedding?.profileId === id) return '正用在記憶';
     return null;

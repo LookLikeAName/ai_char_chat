@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import type { ProfileDto } from '@acc/shared';
+import { utilityBinding, type ProfileDto } from '@acc/shared';
 import { api, qk } from '../../lib/api.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
 
@@ -10,6 +10,7 @@ export function SummaryCard({ profile }: { profile: ProfileDto }) {
   const toast = useToast();
   const qc = useQueryClient();
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
+  const canSummarize = !!settings && !!utilityBinding(settings, 'summary');
   const [editing, setEditing] = useState<string | null>(null);
 
   const done = (p: ProfileDto) => qc.setQueryData(qk.profile, p);
@@ -53,7 +54,7 @@ export function SummaryCard({ profile }: { profile: ProfileDto }) {
           {profile.summary ? <p className="summary-text">{profile.summary}</p> : <p className="hint">還沒有摘要。</p>}
           {profile.summaryStale && <p className="warn-text hint">你的回答在摘要產生之後有更新，建議重新產生。</p>}
           <div className="row">
-            {settings?.utilityLlm ? (
+            {canSummarize ? (
               <button type="button" className="btn" onClick={() => generate.mutate()} disabled={generate.isPending}>
                 {generate.isPending ? '撰寫中…' : profile.summary ? '重新產生' : '產生摘要'}
               </button>

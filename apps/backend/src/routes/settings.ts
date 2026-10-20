@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { adultTestSchema, appSettingsPatchSchema, appSettingsSchema, isValidTimezone } from '@acc/shared';
+import { adultTestSchema, appSettingsPatchSchema, appSettingsSchema, isValidTimezone, utilityProfileIds } from '@acc/shared';
 import { HttpError, parseBody } from '../errors.ts';
 import { runAdultTest } from '../services/adultTest.ts';
 import { assertProfileExists, getProfile } from '../services/llmProfiles.ts';
@@ -13,7 +13,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const patch = parseBody(appSettingsPatchSchema, req.body);
     const next = appSettingsSchema.parse({ ...(await loadSettings(db)), ...patch });
     if (!isValidTimezone(next.timezone)) throw new HttpError(400, `無效的時區：${next.timezone}`);
-    if (next.utilityLlm) await assertProfileExists(db, next.utilityLlm.profileId, 'chat');
+    for (const id of utilityProfileIds(next)) await assertProfileExists(db, id, 'chat');
     if (next.embedding) await assertProfileExists(db, next.embedding.profileId, 'embedding');
     if (next.imageGen) await assertProfileExists(db, next.imageGen.profileId, 'image');
     await saveSettings(db, next);

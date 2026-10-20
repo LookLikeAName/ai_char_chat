@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { eq, sql } from 'drizzle-orm';
-import { defaultVision, type AppSettings } from '@acc/shared';
+import { defaultVision, utilityBinding, type AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { llmProfiles, messages, type MessageImage } from '../db/schema.ts';
 import { logEvent } from '../observability.ts';
@@ -32,7 +32,8 @@ const CAPTION_PROMPT =
 
 /** 替一張圖片寫描述並存起來；系統工具模型看不懂圖片時回傳 null */
 async function caption(ctx: CallContext & { mediaDir: string }, settings: AppSettings, m: LoadedHistory[number]): Promise<string | null> {
-  if (!settings.utilityLlm || !m.imageFile || !(await profileVision(ctx.db, settings.utilityLlm.profileId))) return null;
+  const binding = utilityBinding(settings, 'caption');
+  if (!binding || !m.imageFile || !(await profileVision(ctx.db, binding.profileId))) return null;
   const data = await readFile(path.join(ctx.mediaDir, m.imageFile.path)).catch(() => null);
   if (!data) return null;
   const text = await callUtility(

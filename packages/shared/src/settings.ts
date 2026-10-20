@@ -1,10 +1,45 @@
 import { z } from 'zod';
 import { IMAGE_STYLES, type ImageStyle } from './images.ts';
-import { llmBindingSchema } from './llm.ts';
+import { llmBindingSchema, type LlmBinding } from './llm.ts';
 
 const imageStyles = Object.keys(IMAGE_STYLES) as [ImageStyle, ...ImageStyle[]];
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '格式為 HH:MM');
+
+/** 系統工具模型負責的功能，可以各自指定模型（例如補完角色用好一點的、摘要用便宜的） */
+export const UTILITY_TASKS = ['persona', 'summary', 'memory', 'life', 'caption', 'judge'] as const;
+export type UtilityTask = (typeof UTILITY_TASKS)[number];
+
+export const UTILITY_TASK_LABELS: Record<UtilityTask, { title: string; hint: string }> = {
+  persona: { title: '補完角色與一致性檢查', hint: '產生整份人格設定，建議用比較好的模型' },
+  summary: { title: '玩家摘要', hint: '測驗做完後整理你的 profile 摘要' },
+  memory: { title: '整理記憶與印象', hint: '聊天告一段落時萃取記憶、每天整理對你的印象；呼叫次數最多' },
+  life: { title: '生活日誌', hint: '每個 avatar 每天產生一次今天發生的事' },
+  caption: { title: '描述圖片', hint: '聊天模型看不懂圖片時，用它替圖片寫文字描述；要選看得懂圖片的模型' },
+  judge: { title: '成人內容測試的判斷', hint: '替測試結果分級' },
+};
+
+/** 用途（usage_log 的 purpose）屬於哪個功能 */
+export const UTILITY_TASK_OF: Record<string, UtilityTask> = {
+  'persona.generate': 'persona',
+  'persona.check': 'persona',
+  'profile.summary': 'summary',
+  'memory.extract': 'memory',
+  'memory.reflect': 'memory',
+  'life.log': 'life',
+  'image.caption': 'caption',
+  'adult.test': 'judge',
+};
+
+/** 這個功能用哪個系統工具模型：有另外指定就用它，否則用預設的 */
+export function utilityBinding(settings: Pick<AppSettings, 'utilityLlm' | 'utilityByTask'>, task: UtilityTask): LlmBinding | null {
+  return settings.utilityByTask?.[task] ?? settings.utilityLlm ?? null;
+}
+
+/** 所有系統工具模型用到的設定檔 */
+export function utilityProfileIds(settings: Pick<AppSettings, 'utilityLlm' | 'utilityByTask'>): string[] {
+  return [settings.utilityLlm, ...Object.values(settings.utilityByTask ?? {})].flatMap((b) => (b ? [b.profileId] : []));
+}
 
 export const appSettingsSchema = z.object({
   /** 作息、勿擾時段都用這個時區計算 */
@@ -23,8 +58,10 @@ export const appSettingsSchema = z.object({
     .default({ enabled: true, dailyLimit: 3 }),
   /** 在聊天畫面顯示 avatar 的內心想法（偷看用，也方便調整角色） */
   showInnerThoughts: z.boolean().default(false),
-  /** 系統工具模型：補完設定、萃取記憶、生活日誌… */
+  /** 系統工具模型：補完設定、萃取記憶、生活日誌…（預設，每個功能可以另外指定） */
   utilityLlm: llmBindingSchema.nullable().default(null),
+  /** 依功能指定的系統工具模型；沒指定的用 utilityLlm */
+  utilityByTask: z.partialRecord(z.enum(UTILITY_TASKS), llmBindingSchema).default({}),
   /** 頭像與照片生成：用哪個「圖片生成」設定檔（模型就是設定檔裡的模型） */
   imageGen: z.object({ profileId: z.uuid() }).nullable().default(null),
   /** avatar 傳照片（用頭像生成的圖片模型）：每個 avatar 每天最多幾張、照片的風格 */

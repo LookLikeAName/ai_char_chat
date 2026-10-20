@@ -1,5 +1,5 @@
 // 系統工具模型的呼叫（補完設定、一致性檢查…）
-import type { AppSettings } from '@acc/shared';
+import { UTILITY_TASK_OF, UTILITY_TASK_LABELS, utilityBinding, type AppSettings } from '@acc/shared';
 import { HttpError } from '../errors.ts';
 import { LlmError, type ChatMessage } from '../llm/index.ts';
 import { callWithBinding, type CallContext } from '../services/llmCall.ts';
@@ -14,7 +14,9 @@ export async function callUtility(
   purpose: string,
   opts: { json?: boolean; avatarId?: string } = {},
 ): Promise<string> {
-  const binding = settings.utilityLlm;
+  // 依功能挑模型（例如補完角色用好一點的、摘要用便宜的）；沒另外指定就用預設的
+  const task = UTILITY_TASK_OF[purpose];
+  const binding = task ? utilityBinding(settings, task) : settings.utilityLlm;
   if (!binding) throw new HttpError(400, '請先到「設定 → 一般」選擇系統工具模型');
   const params = { ...binding.params };
   if (params.maxOutputTokens !== undefined && params.maxOutputTokens < MIN_OUTPUT_TOKENS) {
@@ -29,7 +31,9 @@ export async function callUtility(
     );
     return res.text;
   } catch (err) {
-    if (err instanceof LlmError) throw new HttpError(502, `系統工具模型呼叫失敗：${err.message}`);
+    if (err instanceof LlmError) {
+      throw new HttpError(502, `系統工具模型${task ? `（${UTILITY_TASK_LABELS[task].title}）` : ''}呼叫失敗：${err.message}`);
+    }
     throw err;
   }
 }

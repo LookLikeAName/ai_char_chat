@@ -1,7 +1,7 @@
 // 記憶萃取：對話告一段落（最後一則訊息後 10 分鐘，或累積 30 則）時，
 // 請系統工具模型以 avatar 的角度挑出值得記住的事。重複觸發是安全的（以 memory_up_to 記錄處理到哪）。
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
-import { shownName, type AppSettings } from '@acc/shared';
+import { shownName, utilityBinding, type AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, conversationMembers, conversations, messages, type MessageImage } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
@@ -59,7 +59,7 @@ export async function extractMemories(
   const last = rows.at(-1)!;
   // 對話還在進行中：等下一次（每次回覆後都會再排一次）
   if (now.getTime() - last.createdAt.getTime() < idleMs && rows.length < EXTRACT_MAX_PENDING) return 'later';
-  if (!settings.utilityLlm) throw new HttpError(400, '沒有系統工具模型，無法整理記憶');
+  if (!utilityBinding(settings, 'memory')) throw new HttpError(400, '沒有系統工具模型，無法整理記憶');
 
   const avatar = member.avatar;
   const others = await db

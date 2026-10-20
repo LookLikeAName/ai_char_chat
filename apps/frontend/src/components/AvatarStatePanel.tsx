@@ -6,6 +6,7 @@ import {
   EVENT_LABELS,
   INITIAL_STAGES,
   STAGE_LABELS,
+  utilityBinding,
   type InitialStage,
   type Mood,
 } from '@acc/shared';
@@ -49,6 +50,7 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
   const qc = useQueryClient();
   const { data: state } = useQuery({ queryKey: qk.avatarState(avatarId), queryFn: () => api.avatarState(avatarId) });
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
+  const canRemember = !!settings && !!utilityBinding(settings, 'memory');
   const [showAll, setShowAll] = useState(false);
   const [resetTo, setResetTo] = useState<InitialStage | ''>('');
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.avatarState(avatarId) });
@@ -153,7 +155,7 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
       <dt>對你的印象</dt>
       <dd>
         {state.impression ? <p className="impression">{state.impression}</p> : <span className="hint">還沒有整理過。</span>}
-        {settings?.utilityLlm && (
+        {canRemember && (
           <button className="btn btn-small btn-ghost" onClick={() => reflect.mutate()} disabled={reflect.isPending}>
             {reflect.isPending ? '整理中…' : '現在整理'}
           </button>
@@ -164,7 +166,7 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
       <dd>
         {state.memories.length === 0 ? (
           <span className="hint">
-            {settings?.utilityLlm ? '聊天告一段落（約 10 分鐘沒有新訊息）後會整理記憶。' : '設定系統工具模型後才會整理記憶。'}
+            {canRemember ? '聊天告一段落（約 10 分鐘沒有新訊息）後會整理記憶。' : '設定系統工具模型後才會整理記憶。'}
           </span>
         ) : (
           <ul className="memories">

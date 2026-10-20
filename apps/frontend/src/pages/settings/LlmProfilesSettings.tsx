@@ -10,6 +10,7 @@ import {
   PROFILE_KIND_LABELS,
   PROFILE_KINDS,
   PROVIDER_LABELS,
+  utilityProfileIds,
   type AppSettings,
   type LlmParams,
   type LlmProfileDto,
@@ -28,7 +29,7 @@ function usageLabel(p: LlmProfileDto, settings: AppSettings | undefined): string
   if (p.kind === 'chat') {
     const parts = [
       p.usedBy ? `${p.usedBy} 個 avatar 使用中` : '',
-      settings?.utilityLlm?.profileId === p.id ? '系統工具模型' : '',
+      settings && utilityProfileIds(settings).includes(p.id) ? '系統工具模型' : '',
     ];
     return parts.filter(Boolean).join('・') || null;
   }

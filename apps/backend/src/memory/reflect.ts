@@ -1,6 +1,6 @@
 // 反思：把最近的記憶整合成對玩家的整體印象（每天最多一次）。
 import { and, desc, eq, gt } from 'drizzle-orm';
-import { STAGE_LABELS, type AppSettings } from '@acc/shared';
+import { STAGE_LABELS, utilityBinding, type AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, avatarState, memories } from '../db/schema.ts';
 import { callUtility } from '../persona/utility.ts';
@@ -24,7 +24,7 @@ export async function reflect(
   const now = opts.now ?? new Date();
   const db: Db = ctx.db;
   const [avatar] = await db.select().from(avatars).where(eq(avatars.id, avatarId));
-  if (!avatar || !settings.utilityLlm) return false;
+  if (!avatar || !utilityBinding(settings, 'memory')) return false;
   const [state] = await db.select().from(avatarState).where(eq(avatarState.avatarId, avatarId));
   if (!opts.force && state?.reflectedAt && now.getTime() - state.reflectedAt.getTime() < REFLECT_INTERVAL_MS) return false;
 

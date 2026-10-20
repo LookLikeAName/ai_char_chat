@@ -349,6 +349,8 @@ prompt 依序組成：
 - 成人內容：雲端供應商有各自的使用政策，可能拒絕；開啟成人內容時會放寬 Gemini 的安全過濾，仍被拒絕時可以替個別 avatar 換成限制較少的模型（例如本機模型）。
 - 成人內容測試（設定 → 一般 → 內容，勾選後出現；`POST /settings/adult-test`，`services/adultTest.ts`）：選一個聊天用的設定檔，用和真正回覆相同的 prompt（交往中的測試角色、允許成人內容、放寬安全設定）請它把親密的過程露骨地寫出來。結果分成：可以、只到暗示、拒絕、被供應商擋下（Gemini 的 `SAFETY`／`PROHIBITED_CONTENT`、OpenAI 的 `content_filter`、Anthropic 的 `refusal`，或錯誤訊息提到安全過濾）、測試失敗。有系統工具模型時由它分級（也放寬安全設定），沒有或它不肯判斷時用關鍵字粗略判斷。用量記為 `adult.test`，不受每日上限限制。
 
+- **系統工具模型依功能指定**（`settings.utilityByTask`，`packages/shared/src/settings.ts` 的 `UTILITY_TASKS`）：補完角色與一致性檢查、玩家摘要、整理記憶與印象、生活日誌、描述圖片、成人內容測試的判斷，各自可以選一個聊天用的設定檔（用它的預設參數）；沒指定的用預設的 `utilityLlm`。呼叫時由用途（`usage_log.purpose`）對應到功能（`UTILITY_TASK_OF`），用 `utilityBinding()` 挑模型。被任何一項用到的設定檔都不能刪除。
+
 ### 6.2 記憶結構（參考 Generative Agents，Park et al., 2023）
 
 | 種類 | 內容 | 何時產生 |
