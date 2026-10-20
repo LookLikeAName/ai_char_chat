@@ -9,7 +9,8 @@ import { appSettingsSchema, type AppSettings } from '@acc/shared';
 import { buildApp } from '../src/app.ts';
 import { SecretBox } from '../src/crypto.ts';
 import { createDb, runMigrations } from '../src/db/client.ts';
-import { avatars, conversationMembers, conversations, llmProfiles, messages, relationships } from '../src/db/schema.ts';
+import { avatars, conversationMembers, conversations, llmProfiles, memories, messages, relationships } from '../src/db/schema.ts';
+import { extractMemories } from '../src/memory/extract.ts';
 import type { AgentJob } from '../src/jobs.ts';
 import type { FetchFn } from '../src/llm/index.ts';
 import { MemoryLock } from '../src/lock.ts';
@@ -17,7 +18,7 @@ import { addMemories } from '../src/memory/store.ts';
 import { proactiveTick } from '../src/proactive/tick.ts';
 import { ReplyEngine } from '../src/reply/engine.ts';
 import { getRelationship } from '../src/relationship/service.ts';
-import { saveSettings } from '../src/services/settings.ts';
+import { loadSettings, saveSettings } from '../src/services/settings.ts';
 import { WsHub } from '../src/ws.ts';
 import { SAMPLE_PERSONA } from './fixtures/persona.ts';
 
@@ -152,6 +153,20 @@ describe.skipIf(!url)('群組', () => {
     expect(await engine().handleGroupTurn(groupId)).toBe('early');
     expect(jobs.at(-1)!.job).toEqual({ kind: 'group.turn', conversationId: groupId });
     expect(prompts).toHaveLength(0);
+  });
+
+  it('群組的記憶萃取：關於其他成員的記憶標成那個成員', async () => {
+    await saveSettings(db, appSettingsSchema.parse({ timezone: 'Asia/Taipei', utilityLlm: { profileId: (await db.select().from(llmProfiles))[0]!.id, params: {} } }));
+    await say('阿哲你在哪上班？');
+    await say('在設計公司', 'avatar', '阿哲');
+    replyFor = () => ({ memories: [{ content: '阿哲在設計公司上班', importance: 5, about: '阿哲' }, { content: '對方在問大家的工作', importance: 3, about: '對方' }] });
+    const ctx = { db, box, fetchFn };
+    const later = new Date(Date.now() + 60 * 60_000);
+    expect(await extractMemories(ctx, await loadSettings(db), null, ids['小雨']!, groupId, later)).toBe('done');
+    const rows = await db.select().from(memories).where(eq(memories.avatarId, ids['小雨']!));
+    expect(rows.find((r) => r.content.startsWith('阿哲'))!.about).toBe(`avatar:${ids['阿哲']}`);
+    expect(rows.find((r) => r.content.startsWith('對方'))!.about).toBe('user');
+    expect(rows.every((r) => r.visibility === `group:${groupId}`)).toBe(true);
   });
 
   it('用顯示名稱點名也算；群組裡的紀錄標顯示名稱', async () => {

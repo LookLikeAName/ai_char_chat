@@ -4,7 +4,8 @@ import { eq, sql } from 'drizzle-orm';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appSettingsSchema, type ServerEvent } from '@acc/shared';
+import { appSettingsSchema, preferencesSchema, type ServerEvent } from '@acc/shared';
+import { randomUUID } from 'node:crypto';
 import { buildApp } from '../src/app.ts';
 import { SecretBox } from '../src/crypto.ts';
 import { createDb, runMigrations } from '../src/db/client.ts';
@@ -15,6 +16,7 @@ import { extractMemories } from '../src/memory/extract.ts';
 import { reflect } from '../src/memory/reflect.ts';
 import { addMemories, backfillEmbeddings, retrieveMemories } from '../src/memory/store.ts';
 import { ReplyEngine } from '../src/reply/engine.ts';
+import { savePreferences } from '../src/profile/service.ts';
 import { getRelationship } from '../src/relationship/service.ts';
 import { WsHub } from '../src/ws.ts';
 import { FakeEmbedder } from './fixtures/embedder.ts';
@@ -108,11 +110,18 @@ describe.skipIf(!url)('記憶與關係', () => {
       expect(await extractMemories(ctx, settings, null, avatarId, conversationId, new Date('2026-10-19T10:05:00Z'))).toBe('later');
       expect(prompts).toHaveLength(0);
 
-      replies = [JSON.stringify({ memories: [{ content: '對方下週二要面試', importance: 7 }, { content: '' }] })];
+      await savePreferences(db, preferencesSchema.parse({ nickname: '阿明' }));
+      replies = [
+        JSON.stringify({
+          memories: [{ content: '對方下週二要面試', importance: 7 }, { content: '我答應面試完請他喝咖啡', importance: 5, about: '我' }, { content: '' }],
+        }),
+      ];
       expect(await extractMemories(ctx, settings, null, avatarId, conversationId, new Date('2026-10-19T10:20:00Z'))).toBe('done');
       const rows = await db.select().from(memories);
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ content: '對方下週二要面試', importance: 7, visibility: 'private', sourceConversationId: conversationId });
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.importance === 7)).toMatchObject({ content: '對方下週二要面試', about: 'user', visibility: 'private', sourceConversationId: conversationId });
+      expect(rows.find((r) => r.importance === 5)!.about).toBe('self');
+      expect(prompts[0].messages.at(-1).content).toContain('名字是「阿明」');
       expect(prompts[0].messages.at(-1).content).toContain('對方：我下週二要面試');
       expect(prompts[0].messages.at(-1).content).toContain('我：加油啦');
 
@@ -139,6 +148,26 @@ describe.skipIf(!url)('記憶與關係', () => {
       expect(await reflect(ctx, settings, null, avatarId, { now: later })).toBe(false);
       replies = ['更新後的印象'];
       expect(await reflect(ctx, settings, null, avatarId, { now: later, force: true })).toBe(true);
+    });
+
+    it('整理印象時帶入對方的名字、你們的關係與自己的個性，不混入關於其他 avatar 的記憶', async () => {
+      await savePreferences(db, preferencesSchema.parse({ nickname: '阿明' }));
+      await addMemories(db, null, [
+        { avatarId, kind: 'event', content: '對方早上喝了豆漿', importance: 5 },
+        { avatarId, kind: 'event', content: '我答應對方週末烤蛋糕', importance: 6, about: 'self' },
+        { avatarId, kind: 'event', content: 'Jerry 說他在設計公司上班', importance: 5, about: `avatar:${randomUUID()}` },
+      ]);
+      replies = ['對方是個早起也會亂的人。'];
+      expect(await reflect(ctx, settings, null, avatarId, { force: true })).toBe(true);
+      const content = prompts.at(-1).messages.at(-1).content as string;
+      expect(content).toContain('對方的名字（希望被這樣稱呼）：阿明');
+      expect(content).toContain(SAMPLE_PERSONA.relationship.withUser);
+      expect(content).toContain(`你稱呼對方「${SAMPLE_PERSONA.relationship.callsUser}」`);
+      expect(content).toContain(`個性：${SAMPLE_PERSONA.personality.traits.join('、')}`);
+      expect(content).toContain('對方早上喝了豆漿');
+      expect(content).toContain('我答應對方週末烤蛋糕');
+      expect(content).not.toContain('Jerry');
+      expect(content).not.toContain('他是個');
     });
   });
 

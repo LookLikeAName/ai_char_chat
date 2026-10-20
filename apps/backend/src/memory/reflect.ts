@@ -1,9 +1,11 @@
 // 反思：把最近的記憶整合成對玩家的整體印象（每天最多一次）。
-import { and, desc, eq, gt } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { STAGE_LABELS, utilityBinding, type AppSettings } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatars, avatarState, memories } from '../db/schema.ts';
 import { callUtility } from '../persona/utility.ts';
+import { loadProfile } from '../profile/service.ts';
+import { formatNow, userSection } from '../reply/prompt.ts';
 import { getMood, getRelationship } from '../relationship/service.ts';
 import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
@@ -32,7 +34,14 @@ export async function reflect(
   const fresh = await db
     .select()
     .from(memories)
-    .where(and(eq(memories.avatarId, avatarId), eq(memories.kind, 'event'), gt(memories.createdAt, since)))
+    .where(
+      and(
+        eq(memories.avatarId, avatarId),
+        eq(memories.kind, 'event'),
+        inArray(memories.about, ['user', 'self']),
+        gt(memories.createdAt, since),
+      ),
+    )
     .orderBy(desc(memories.importance), desc(memories.createdAt))
     .limit(30);
   if (fresh.length < (opts.force ? 1 : MIN_NEW_MEMORIES)) return false;
@@ -40,16 +49,36 @@ export async function reflect(
   const previous = await latestImpression(db, avatarId);
   const rel = await getRelationship(db, avatarId);
   const mood = await getMood(db, avatarId, now);
-  const content = `你是「${avatar.name}」（${avatar.bio || '沒有簡介'}）。
-目前你和對方的關係：${STAGE_LABELS[rel.stage]}；你現在的心情：${mood.label}。
-${previous ? `你原本對對方的印象：${previous.content}` : '你還沒有整理過對對方的印象。'}
+  const profile = await loadProfile(db);
+  const p = avatar.persona;
+  const voice = [
+    p.personality?.traits?.length ? `個性：${p.personality.traits.join('、')}` : '',
+    p.speech?.tone ? `說話方式：${p.speech.tone}` : '',
+  ].filter(Boolean);
+  // 跟聊天時一樣，依關係深淺決定知道對方多少
+  const aboutUser = profile.preferences
+    ? userSection({ preferences: profile.preferences, summary: profile.summary, results: profile.results }, rel.stage)
+    : '你對對方的基本資料還不清楚。';
+  const content = `你是「${avatar.name}」（${avatar.bio || '沒有簡介'}）。${voice.length ? `\n${voice.join('\n')}` : ''}
+下面的「對方」指的是和你用通訊軟體聊天的那個人（不是群組裡的其他成員）。
+
+# 你和對方
+${p.relationship?.withUser ? `${p.relationship.withUser}\n` : ''}${p.relationship?.callsUser ? `你稱呼對方「${p.relationship.callsUser}」。\n` : ''}目前的關係：${STAGE_LABELS[rel.stage]}（好感 ${rel.affinity}/100、信任 ${rel.trust}/100）；你現在的心情：${mood.label}。
+
+# 你知道的對方
+${aboutUser}
+
+# 你原本對對方的印象
+${previous ? previous.content : '（還沒有整理過）'}
 
 # 最近記得的事
-${fresh.map((m) => `- ${m.content}`).join('\n')}
+${fresh.map((m) => `- ${formatNow(m.createdAt, settings.timezone)}：${m.content}`).join('\n')}
 
 # 任務
-用你的口吻、第一人稱，寫一段 100～200 字的「我對對方的印象」：他是個怎樣的人、你們現在的感覺、你在意或好奇他的地方。
-要延續原本的印象，有新的觀察就修正；不要條列，只輸出這段文字。`;
+用你的口吻、第一人稱，寫一段 100～200 字的「我對對方的印象」：對方是個怎樣的人、你們現在的感覺、你在意或好奇對方的地方。
+- 延續原本的印象，有新的觀察就修正；符合你們目前的關係，不要比實際更熟或更陌生。
+- 只根據上面寫到的事，不要編造沒發生過的事。
+- 不要提到測驗、問卷或分數；不要條列，只輸出這段文字。`;
 
   const text = await callUtility(
     ctx,

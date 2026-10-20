@@ -10,6 +10,7 @@ import { logEvent } from '../observability.ts';
 import type { CallContext } from '../services/llmCall.ts';
 import { formatNow } from '../reply/prompt.ts';
 import type { Embedder } from './embedder.ts';
+import { loadProfile } from '../profile/service.ts';
 import { addMemories, latestImpression } from './store.ts';
 
 export const EXTRACT_IDLE_MS = 10 * 60 * 1000;
@@ -68,6 +69,13 @@ export async function extractMemories(
     .innerJoin(avatars, eq(avatars.id, conversationMembers.avatarId))
     .where(eq(conversationMembers.conversationId, conversationId));
   const names = new Map<string, string>(others.map((o) => [o.id, shownName(o)]));
+  /** 模型寫的「關於誰」→ user、self 或 avatar:<id>；認不出來的當作關於對方 */
+  const aboutOf = (v: unknown): string => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    if (t === '我' || t === avatar.name || t === shownName(avatar)) return 'self';
+    const other = others.find((o) => o.id !== avatar.id && (t === o.name || t === shownName(o)));
+    return other ? `avatar:${other.id}` : 'user';
+  };
   const transcript = rows
     .map((m) => {
       const who = m.senderType === 'user' ? '對方' : m.senderAvatarId === avatar.id ? '我' : (names.get(m.senderAvatarId ?? '') ?? '其他人');
@@ -76,11 +84,18 @@ export async function extractMemories(
     })
     .join('\n');
   const impression = await latestImpression(db, avatar.id);
+  const profile = await loadProfile(db);
+  const nickname = profile.preferences?.nickname;
+  const group = member.type === 'group';
+  const otherNames = others.filter((o) => o.id !== avatar.id).map((o) => shownName(o));
 
-  const where = member.type === 'group' ? '在群組裡和大家' : '和對方';
+  const where = group ? '在群組裡和大家' : '和對方';
   const content = `你是「${avatar.name}」（${avatar.bio || '沒有簡介'}）。下面是你${where}最近的聊天紀錄。
+「對方」是和你用通訊軟體聊天的那個人${nickname ? `，名字是「${nickname}」` : ''}${avatar.persona.relationship?.withUser ? `（${avatar.persona.relationship.withUser}）` : ''}。${
+    group ? `\n群組裡的其他成員：${otherNames.join('、')}。` : ''
+  }
 ${impression ? `\n你原本對對方的印象：${impression.content}\n` : ''}
-# 聊天紀錄（「我」是你，「對方」是玩家）
+# 聊天紀錄（「我」是你，「對方」是${nickname ? `「${nickname}」` : '和你聊天的人'}）
 ${transcript}
 
 # 任務
@@ -94,15 +109,16 @@ ${transcript}
   }
 不要記沒有資訊量的寒暄。每件寫成一句完整的話，包含具體細節與時間（例如「對方說下週二要去面試，很緊張」）。
 importance：1 = 小事，5 = 值得記得，10 = 非常重要、會一直記得。
+about：這件事主要是關於誰：「對方」、「我」${group ? '，或其他成員的名字' : ''}。
 
 # 輸出格式
-{"memories": [{"content": "…", "importance": 5}]}；沒有值得記的就輸出 {"memories": []}。`;
+{"memories": [{"content": "…", "importance": 5, "about": "對方"}]}；沒有值得記的就輸出 {"memories": []}。`;
 
   const text = await callUtility(ctx, settings, { system: '你負責整理角色的記憶。只輸出 JSON。', messages: [{ role: 'user', content }] }, 'memory.extract', { avatarId });
   const out = parseJsonObject(text);
   const items = (Array.isArray(out?.memories) ? out.memories : [])
-    .filter((m): m is { content: string; importance?: number } => !!m && typeof (m as { content?: unknown }).content === 'string')
-    .map((m) => ({ content: m.content.trim().slice(0, 500), importance: Number(m.importance) || 5 }))
+    .filter((m): m is { content: string; importance?: number; about?: unknown } => !!m && typeof (m as { content?: unknown }).content === 'string')
+    .map((m) => ({ content: m.content.trim().slice(0, 500), importance: Number(m.importance) || 5, about: aboutOf(m.about) }))
     .filter((m) => m.content)
     .slice(0, MAX_MEMORIES);
 
@@ -114,6 +130,7 @@ importance：1 = 小事，5 = 值得記得，10 = 非常重要、會一直記得
       kind: 'event' as const,
       content: m.content,
       importance: m.importance,
+      about: m.about,
       sourceConversationId: conversationId,
       visibility: member.type === 'dm' ? 'private' : `group:${conversationId}`,
     })),
