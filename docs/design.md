@@ -256,6 +256,7 @@ prompt 依序組成：
 - 產生或打字期間玩家又傳訊息：還沒送出任何一則就整輪重來；已經送出幾則就停下，下一輪回新訊息。
 - LLM 失敗時工作重試 3 次（3、6 秒後），都失敗就在對話裡留一則錯誤訊息，玩家可以按「重試」。
 - 對話紀錄裡 avatar 的回合寫成和輸出相同的 JSON，讓沒有 JSON 模式的供應商（Anthropic）也維持格式；格式錯誤時提醒一次，再不行就把純文字當訊息。
+- OpenAI（相容）端點的 JSON 模式：先送 `response_format: json_object`；被拒絕（400 且錯誤提到 response_format，例如 LM Studio 只接受 json_schema 或 text）就改送只要求「是一個物件」的 `json_schema`，再不行就不送、只靠 prompt。試出來的方式依端點＋模型記在記憶體裡，下次直接用。
 - 每次呼叫記進 `usage_log`（用途、avatar、模型、tokens、延遲、成功與否）。
 
 ### 5.2 一對一：延遲與「注意到」

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { complete, listModels, LlmError, type FetchFn } from '../src/llm/index.ts';
 import { alternate } from '../src/llm/http.ts';
+import { resetJsonModes } from '../src/llm/providers/openai.ts';
 
 interface Captured {
   url: string;
@@ -155,6 +156,50 @@ describe('OpenAI 與相容端點', () => {
     );
     expect(calls[0]!.body.max_tokens).toBe(50);
     expect(calls[0]!.headers.authorization).toBeUndefined();
+  });
+
+  it('不接受 json_object 的端點（例如 LM Studio）改用 json_schema，並記住', async () => {
+    resetJsonModes();
+    const calls: any[] = [];
+    // LM Studio：只接受 json_schema 或 text
+    const fetchFn = (async (_u: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      calls.push(body);
+      if (body.response_format?.type === 'json_object') {
+        return new Response(JSON.stringify({ error: "'response_format.type' must be 'json_schema' or 'text'" }), { status: 400 });
+      }
+      return new Response(JSON.stringify(reply));
+    }) as unknown as FetchFn;
+    const llm = { provider: 'openai-compatible' as const, baseUrl: 'http://lmstudio:1234/v1', model: 'qwen' };
+    await expect(complete(llm, { messages, params: {}, json: true }, fetchFn)).resolves.toMatchObject({ text: 'hi' });
+    expect(calls.map((b) => b.response_format?.type)).toEqual(['json_object', 'json_schema']);
+    expect(calls[1].response_format.json_schema.schema).toEqual({ type: 'object' });
+    // 第二次直接用記住的方式
+    await complete(llm, { messages, params: {}, json: true }, fetchFn);
+    expect(calls.map((b) => b.response_format?.type)).toEqual(['json_object', 'json_schema', 'json_schema']);
+    // 不要求 JSON 時不送
+    await complete(llm, { messages, params: {} }, fetchFn);
+    expect(calls.at(-1).response_format).toBeUndefined();
+  });
+
+  it('兩種都不接受就不送 response_format；其他 400 錯誤照常拋出', async () => {
+    resetJsonModes();
+    const types: (string | undefined)[] = [];
+    const fetchFn = (async (_u: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      types.push(body.response_format?.type);
+      if (body.response_format) return new Response(JSON.stringify({ error: { message: 'response_format is not supported' } }), { status: 400 });
+      return new Response(JSON.stringify(reply));
+    }) as unknown as FetchFn;
+    const llm = { provider: 'openai-compatible' as const, baseUrl: 'http://old:8000/v1', model: 'm' };
+    await complete(llm, { messages, params: {}, json: true }, fetchFn);
+    expect(types).toEqual(['json_object', 'json_schema', undefined]);
+
+    const bad = fakeFetch({ error: { message: 'context length exceeded' } }, 400);
+    await expect(
+      complete({ ...llm, baseUrl: 'http://other:8000/v1' }, { messages, params: {}, json: true }, bad.fetchFn),
+    ).rejects.toThrow('context length exceeded');
+    expect(bad.calls).toHaveLength(1);
   });
 
   it('連不上時帶上底層的錯誤代碼', async () => {
