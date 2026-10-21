@@ -374,6 +374,8 @@ prompt 依序組成：
 
 - **系統工具模型依功能指定**（`settings.utilityByTask`，`packages/shared/src/settings.ts` 的 `UTILITY_TASKS`）：補完角色與一致性檢查、玩家摘要、整理記憶與印象、生活日誌、描述圖片、成人內容測試的判斷，各自可以選一個聊天用的設定檔（用它的預設參數）；沒指定的用預設的 `utilityLlm`。呼叫時由用途（`usage_log.purpose`）對應到功能（`UTILITY_TASK_OF`），用 `utilityBinding()` 挑模型。被任何一項用到的設定檔都不能刪除。
 
+- **備援設定檔**（`llm_profiles.fallback`，只有聊天用的設定檔能設）：被拒絕（安全過濾擋下、`content_filter`／`refusal`／Gemini 的 `PROHIBITED_CONTENT` 之類的結束原因、要 JSON 卻回了「抱歉，我無法…」這種拒答）或呼叫失敗（連不上、429、5xx…）時，`callWithBinding` 改用指定的設定檔重新呼叫一次；兩種情況可以分別勾選。改用時用備援設定檔的模型與參數預設值，再套上原本綁定的覆寫參數（思考程度除外）；看不懂圖片的備援會把圖片換成「［圖片］」。每次嘗試各自記在 `llm_traces` 與 `usage_log`，另外記一筆 `llm.fallback` 事件。備援也可以有自己的備援，同一次呼叫不會重複用到同一個設定檔（不會無限循環）。成人內容測試不走備援（測的就是那個模型本身）。設定的匯出／匯入會帶上備援的對應。
+
 ### 6.2 記憶結構（參考 Generative Agents，Park et al., 2023）
 
 | 種類 | 內容 | 何時產生 |

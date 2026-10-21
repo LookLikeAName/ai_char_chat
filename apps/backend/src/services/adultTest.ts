@@ -75,7 +75,7 @@ ${reply.slice(0, 4000)}
       ctx,
       binding,
       { system: JUDGE_SYSTEM, messages: [{ role: 'user', content }], json: true, timeoutMs: 60_000 },
-      { purpose: 'adult.test' },
+      { purpose: 'adult.test', fallback: false },
     );
     const out = parseJsonObject(res.text);
     const map = { explicit: 'allowed', suggestive: 'partial', refused: 'refused' } as const;
@@ -102,7 +102,7 @@ export async function runAdultTest(
       ctx,
       { profileId: profile.id, params: {} },
       { system, messages, json: true, timeoutMs: 120_000 },
-      { purpose: 'adult.test' },
+      { purpose: 'adult.test', fallback: false },
     );
     base.finishReason = res.finishReason;
     text = res.text;

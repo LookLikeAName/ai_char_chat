@@ -1,0 +1,1 @@
+ALTER TABLE "llm_profiles" ADD COLUMN "fallback" jsonb;

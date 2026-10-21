@@ -179,6 +179,18 @@ export function costUsd(pricing: LlmPricing | null | undefined, inputTokens: num
   return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
 }
 
+/** 備援：這個設定檔被拒絕或呼叫失敗時，改用另一個（聊天用的）設定檔，例如雲端被擋就轉到地端 */
+export const llmFallbackSchema = z
+  .object({
+    profileId: z.uuid(),
+    /** 被拒絕：安全過濾擋下、模型拒答 */
+    onRefusal: z.boolean().default(true),
+    /** 呼叫失敗：連不上、額度用完、伺服器錯誤 */
+    onError: z.boolean().default(true),
+  })
+  .refine((f) => f.onRefusal || f.onError, { message: '至少選一種要改用備援的情況', path: ['onRefusal'] });
+export type LlmFallback = z.infer<typeof llmFallbackSchema>;
+
 export const llmProfileInputSchema = z
   .object({
     kind: z.enum(PROFILE_KINDS).default('chat'),
@@ -192,6 +204,8 @@ export const llmProfileInputSchema = z
     pricing: llmPricingSchema.nullable().default(null),
     /** 看得懂圖片；null 表示依供應商預設 */
     vision: z.boolean().nullable().default(null),
+    /** 備援設定檔（只有聊天用的設定檔可以設） */
+    fallback: llmFallbackSchema.nullable().default(null),
   })
   .refine((p) => p.provider !== 'openai-compatible' || !!p.baseUrl, {
     message: 'OpenAI 相容端點必須填寫 Base URL',
@@ -222,6 +236,7 @@ export interface LlmProfileDto {
   visionSet: boolean;
   /** 綁定這個設定檔的 avatar 數量 */
   usedBy: number;
+  fallback: LlmFallback | null;
   createdAt: string;
   updatedAt: string;
 }

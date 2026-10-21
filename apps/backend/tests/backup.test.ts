@@ -78,7 +78,9 @@ describe.skipIf(!url)('設定的匯出／匯入', () => {
   });
 
   it('匯入到空的系統：建立設定檔、設定改指向新的 id、玩家 profile 也回來', async () => {
-    await seed();
+    const { chat, good } = await seed();
+    // Gemini 的備援是 Claude
+    await db.update(llmProfiles).set({ fallback: { profileId: good.id, onRefusal: true, onError: false } }).where(sql`id = ${chat.id}`);
     const file = (await inject<SettingsFile>('GET', '/api/settings/export?apiKeys=true&player=true')).body;
     await reset();
 
@@ -89,6 +91,7 @@ describe.skipIf(!url)('設定的匯出／匯入', () => {
     const profiles = (await inject<LlmProfileDto[]>('GET', '/api/llm-profiles')).body;
     const byName = (n: string) => profiles.find((p) => p.name === n)!;
     expect(byName('Gemini').hasApiKey).toBe(true);
+    expect(byName('Gemini').fallback).toEqual({ profileId: byName('Claude').id, onRefusal: true, onError: false });
     const s = (await inject<AppSettings>('GET', '/api/settings')).body;
     expect(s).toMatchObject({ timezone: 'Asia/Tokyo', adultContent: true });
     expect(s.utilityLlm).toEqual({ profileId: byName('Gemini').id, params: { temperature: 0.2 } });

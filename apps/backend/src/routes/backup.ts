@@ -53,6 +53,7 @@ export async function backupRoutes(app: FastifyInstance) {
         defaults: r.defaults,
         pricing: r.pricing ?? null,
         vision: r.vision,
+        fallback: r.fallback ? { ref: r.fallback.profileId, onRefusal: r.fallback.onRefusal, onError: r.fallback.onError } : null,
       })),
     };
     if (opts.player) {
@@ -71,7 +72,8 @@ export async function backupRoutes(app: FastifyInstance) {
 
     // 先全部檢查過再寫入
     const inputs = file.profiles.map((p) => {
-      const r = llmProfileInputSchema.safeParse({ ...p, apiKey: p.apiKey ?? undefined });
+      // 備援等設定檔都建立好之後再接上
+      const r = llmProfileInputSchema.safeParse({ ...p, apiKey: p.apiKey ?? undefined, fallback: null });
       if (!r.success) throw new HttpError(400, `設定檔「${p.name}」：${r.error.issues[0]?.message ?? '格式不正確'}`);
       return { p, input: r.data };
     });
@@ -119,6 +121,20 @@ export async function backupRoutes(app: FastifyInstance) {
         refs.set(p.ref, row!.id);
         result.profiles.created++;
         if (input.apiKey) result.profiles.keys++;
+      }
+      // 備援：新建立的設定檔接上檔案裡指定的備援（沿用的設定檔維持原本的）
+      for (const { p } of inputs) {
+        const id = refs.get(p.ref);
+        if (!p.fallback || !id || existing.some((e) => e.id === id)) continue;
+        const target = refs.get(p.fallback.ref);
+        if (!target || target === id) {
+          result.warnings.push(`「${p.name}」的備援設定檔沒有匯入，請重新選擇`);
+          continue;
+        }
+        await tx
+          .update(llmProfiles)
+          .set({ fallback: { profileId: target, onRefusal: p.fallback.onRefusal, onError: p.fallback.onError } })
+          .where(eq(llmProfiles.id, id));
       }
     });
 

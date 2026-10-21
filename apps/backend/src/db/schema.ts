@@ -24,6 +24,7 @@ import type {
   TraceDto,
   LifeLogEvent,
   LlmBinding,
+  LlmFallback,
   LlmParams,
   LlmPricing,
   Mood,
@@ -102,6 +103,8 @@ export const llmProfiles = pgTable('llm_profiles', {
   pricing: jsonb('pricing').$type<LlmPricing | null>(),
   /** 看得懂圖片；null 依供應商預設 */
   vision: boolean('vision'),
+  /** 備援設定檔：被拒絕或呼叫失敗時改用 */
+  fallback: jsonb('fallback').$type<LlmFallback | null>(),
   ...timestamps,
 });
 

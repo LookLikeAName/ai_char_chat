@@ -33,6 +33,7 @@ export function profileToDto(row: ProfileRow, usedBy: number): LlmProfileDto {
     vision: row.vision ?? defaultVision(row.provider),
     visionSet: row.vision !== null,
     usedBy,
+    fallback: row.fallback ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

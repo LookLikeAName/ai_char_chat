@@ -141,6 +141,13 @@
       "when": 1792591829428,
       "tag": "0019_system_state",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792603778680,
+      "tag": "0020_profile_fallback",
+      "breakpoints": true
     }
   ]
 }

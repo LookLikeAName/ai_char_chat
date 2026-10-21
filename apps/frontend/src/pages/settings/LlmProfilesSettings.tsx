@@ -129,6 +129,10 @@ interface FormState {
   priceIn: string;
   priceOut: string;
   vision: 'auto' | 'yes' | 'no';
+  /** 備援設定檔；空字串表示不用 */
+  fallbackId: string;
+  onRefusal: boolean;
+  onError: boolean;
 }
 
 function ProfileForm({
@@ -154,7 +158,12 @@ function ProfileForm({
     priceIn: profile?.pricing ? String(profile.pricing.input) : '',
     priceOut: profile?.pricing ? String(profile.pricing.output) : '',
     vision: !profile?.visionSet ? 'auto' : profile.vision ? 'yes' : 'no',
+    fallbackId: profile?.fallback?.profileId ?? '',
+    onRefusal: profile?.fallback?.onRefusal ?? true,
+    onError: profile?.fallback?.onError ?? true,
   });
+  const { data: allProfiles = [] } = useQuery({ queryKey: qk.llmProfiles, queryFn: api.llmProfiles });
+  const fallbackChoices = allProfiles.filter((p) => p.kind === 'chat' && p.id !== profile?.id);
   const [models, setModels] = useState<string[] | null>(null);
   const [test, setTest] = useState<LlmTestResult | { pending: true } | null>(null);
   const patch = (p: Partial<FormState>) => setF((prev) => ({ ...prev, ...p }));
@@ -174,6 +183,10 @@ function ProfileForm({
         ? { input: Math.max(0, Number(f.priceIn) || 0), output: Math.max(0, Number(f.priceOut) || 0) }
         : null,
     vision: !chat || f.vision === 'auto' ? null : f.vision === 'yes',
+    fallback:
+      chat && f.fallbackId && (f.onRefusal || f.onError)
+        ? { profileId: f.fallbackId, onRefusal: f.onRefusal, onError: f.onError }
+        : null,
   });
 
   const draft = (): LlmDraft => ({
@@ -371,6 +384,39 @@ function ProfileForm({
               相容端點要看模型，例如 Ollama 的 llava、qwen2.5-vl 看得懂。
             </span>
           </label>
+        </section>
+      )}
+
+      {chat && (
+        <section className="card">
+          <h2>備援（選填）</h2>
+          <label className="field">
+            <span className="field-label">這個設定檔不行的時候，改用</span>
+            <select value={f.fallbackId} onChange={(e) => patch({ fallbackId: e.target.value })}>
+              <option value="">不用備援</option>
+              {fallbackChoices.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}（{p.model}）
+                </option>
+              ))}
+            </select>
+            <span className="hint">
+              例如雲端的模型拒絕寫某些內容，就直接轉到地端的 Ollama／LM Studio。用到這個設定檔的地方（avatar 的大腦、系統工具模型）都會跟著改用；改用時用備援設定檔自己的模型與參數預設值，avatar 自己調過的參數（思考程度除外）照樣套用。兩次呼叫都會記在監控與用量裡。
+            </span>
+          </label>
+          {f.fallbackId && (
+            <>
+              <label className="check">
+                <input type="checkbox" checked={f.onRefusal} onChange={(e) => patch({ onRefusal: e.target.checked })} />
+                被拒絕時（安全過濾擋下、模型拒答）
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={f.onError} onChange={(e) => patch({ onError: e.target.checked })} />
+                呼叫失敗時（連不上、額度用完、伺服器錯誤）
+              </label>
+              {!f.onRefusal && !f.onError && <p className="hint warn-text">至少選一種情況，不然不會用到備援。</p>}
+            </>
+          )}
         </section>
       )}
 

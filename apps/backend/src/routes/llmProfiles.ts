@@ -8,6 +8,7 @@ import {
   PROVIDER_TYPES,
   resolveParams,
   utilityProfileIds,
+  type LlmFallback,
   type LlmParams,
   type ProfileKind,
 } from '@acc/shared';
@@ -18,6 +19,7 @@ import { generateImage } from '../images/generate.ts';
 import { complete, listModels, LlmError, type ResolvedLlm } from '../llm/index.ts';
 import { ApiEmbedder } from '../memory/embedder.ts';
 import {
+  assertProfileExists,
   getProfile,
   profileToDto,
   profileUsage,
@@ -54,8 +56,18 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     return rows.map((r) => profileToDto(r, usage.get(r.id) ?? 0));
   });
 
+  /** 備援只有聊天用的設定檔能設，而且要指向另一個聊天用的設定檔 */
+  async function checkFallback(kind: ProfileKind, fallback: LlmFallback | null, selfId?: string): Promise<LlmFallback | null> {
+    if (!fallback) return null;
+    if (kind !== 'chat') throw new HttpError(400, '只有聊天用的設定檔可以設定備援');
+    if (fallback.profileId === selfId) throw new HttpError(400, '備援不能是自己');
+    await assertProfileExists(db, fallback.profileId, 'chat');
+    return fallback;
+  }
+
   app.post('/llm-profiles', async (req, reply) => {
     const input = parseBody(llmProfileInputSchema, req.body);
+    const fallback = await checkFallback(input.kind, input.fallback);
     const [row] = await db
       .insert(llmProfiles)
       .values({
@@ -69,6 +81,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         defaults: input.defaults,
         pricing: input.pricing,
         vision: input.vision,
+        fallback,
       })
       .returning();
     await events.publish({ type: 'llmProfiles.changed' });
@@ -79,6 +92,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     const { id } = parseBody(idParams, req.params);
     const input = parseBody(llmProfileInputSchema, req.body);
     const current = await getProfile(db, id);
+    const fallback = await checkFallback(input.kind, input.fallback, id);
     // 正在使用中的設定檔不能改用途（例如 avatar 綁著的不能改成圖片生成）
     if (current.kind !== input.kind) {
       const inUse = await usesOf(id);
@@ -101,6 +115,7 @@ export async function llmProfileRoutes(app: FastifyInstance) {
         defaults: input.defaults,
         pricing: input.pricing,
         vision: input.vision,
+        fallback,
         ...keyFields,
         updatedAt: new Date(),
       })
@@ -119,6 +134,8 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     if (utilityProfileIds(settings).includes(id)) throw new HttpError(409, '系統工具模型正在使用這個設定檔');
     if (settings.embedding?.profileId === id) throw new HttpError(409, '記憶的嵌入模型正在使用這個設定檔');
     if (settings.imageGen?.profileId === id) throw new HttpError(409, '頭像與照片生成正在使用這個設定檔');
+    const backing = (await db.select().from(llmProfiles)).filter((p) => p.fallback?.profileId === id);
+    if (backing.length) throw new HttpError(409, `「${backing.map((p) => p.name).join('、')}」用它當備援，請先改掉`);
     await db.delete(llmProfiles).where(eq(llmProfiles.id, id));
     await events.publish({ type: 'llmProfiles.changed' });
     return reply.status(204).send();
@@ -167,6 +184,8 @@ export async function llmProfileRoutes(app: FastifyInstance) {
     if (utilityProfileIds(s).includes(id)) return '是系統工具模型';
     if (s.imageGen?.profileId === id) return '正用在頭像與照片生成';
     if (s.embedding?.profileId === id) return '正用在記憶';
+    const backing = (await db.select({ fallback: llmProfiles.fallback }).from(llmProfiles)).some((p) => p.fallback?.profileId === id);
+    if (backing) return '是別的設定檔的備援';
     return null;
   }
 

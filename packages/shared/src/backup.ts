@@ -25,6 +25,8 @@ export const exportedProfileSchema = z.object({
   defaults: llmParamsSchema.default({}),
   pricing: llmPricingSchema.nullable().default(null),
   vision: z.boolean().nullable().default(null),
+  /** 備援：ref 指向檔案裡另一個設定檔 */
+  fallback: z.object({ ref: z.string().min(1).max(64), onRefusal: z.boolean(), onError: z.boolean() }).nullable().default(null),
 });
 export type ExportedProfile = z.infer<typeof exportedProfileSchema>;
 
