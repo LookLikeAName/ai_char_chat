@@ -49,7 +49,7 @@ describe('Gemini', () => {
     });
     const res = await complete(
       llm,
-      { system: '你是小雨', messages, params: { temperature: 0.8, maxOutputTokens: 100 }, json: true, relaxedSafety: true },
+      { system: '你是小雨', messages, params: { temperature: 0.8, maxOutputTokens: 100 }, json: true },
       fetchFn,
     );
     expect(res).toEqual({ text: '你好', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'STOP' });
@@ -62,7 +62,16 @@ describe('Gemini', () => {
       maxOutputTokens: 100,
       responseMimeType: 'application/json',
     });
+    // 可以調整的安全過濾一律不擋（不管有沒有開成人內容）
     expect(c.body.safetySettings).toHaveLength(4);
+    expect(c.body.safetySettings.every((x: { threshold: string }) => x.threshold === 'BLOCK_NONE')).toBe(true);
+  });
+
+  it('被沒辦法關掉的限制擋下時，回報清楚的錯誤', async () => {
+    const { fetchFn } = fakeFetch({ candidates: [{ content: { parts: [] }, finishReason: 'PROHIBITED_CONTENT' }] });
+    await expect(complete(llm, { messages, params: {} }, fetchFn)).rejects.toThrow('被擋下（PROHIBITED_CONTENT）');
+    const ok = fakeFetch({ candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }] });
+    await expect(complete(llm, { messages, params: {} }, ok.fetchFn)).resolves.toMatchObject({ text: '' });
   });
 
   it('思考程度：Gemini 3 送 thinkingLevel、2.5 送 thinkingBudget；其他供應商不送', async () => {

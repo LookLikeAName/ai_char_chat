@@ -74,7 +74,7 @@ ${reply.slice(0, 4000)}
     const res = await callWithBinding(
       ctx,
       binding,
-      { system: JUDGE_SYSTEM, messages: [{ role: 'user', content }], json: true, relaxedSafety: true, timeoutMs: 60_000 },
+      { system: JUDGE_SYSTEM, messages: [{ role: 'user', content }], json: true, timeoutMs: 60_000 },
       { purpose: 'adult.test' },
     );
     const out = parseJsonObject(res.text);
@@ -101,7 +101,7 @@ export async function runAdultTest(
     const res = await callWithBinding(
       ctx,
       { profileId: profile.id, params: {} },
-      { system, messages, json: true, relaxedSafety: true, timeoutMs: 120_000 },
+      { system, messages, json: true, timeoutMs: 120_000 },
       { purpose: 'adult.test' },
     );
     base.finishReason = res.finishReason;

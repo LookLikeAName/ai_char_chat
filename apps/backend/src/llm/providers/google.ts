@@ -10,12 +10,21 @@ interface GenerateResponse {
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
 }
 
-const SAFETY_CATEGORIES = [
+/**
+ * Gemini 可以調整的安全過濾一律設成最低（不擋）：內容的尺度由我們自己的 prompt 控制（成人內容的開關），
+ * 預設的過濾常把吐槽、吵架之類的正常對話誤判成騷擾而整個不回。
+ * 兒少安全等核心保護與模型本身的政策不受這個設定影響，被擋時 finishReason 會是 PROHIBITED_CONTENT 之類。
+ * https://ai.google.dev/gemini-api/docs/safety-settings
+ */
+export const GEMINI_SAFETY_SETTINGS = [
   'HARM_CATEGORY_HARASSMENT',
   'HARM_CATEGORY_HATE_SPEECH',
   'HARM_CATEGORY_SEXUALLY_EXPLICIT',
   'HARM_CATEGORY_DANGEROUS_CONTENT',
-];
+].map((category) => ({ category, threshold: 'BLOCK_NONE' }));
+
+/** 因為內容被擋下的結束原因（沒辦法用安全設定關掉的那些） */
+const BLOCKED_FINISH = ['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'IMAGE_SAFETY'];
 
 function modelPath(model: string): string {
   return model.startsWith('models/') ? model : `models/${model}`;
@@ -41,9 +50,7 @@ export const googleAdapter: ProviderAdapter = {
         responseMimeType: req.json ? 'application/json' : undefined,
         thinkingConfig: geminiThinkingConfig(llm.model, p.thinking),
       },
-      safetySettings: req.relaxedSafety
-        ? SAFETY_CATEGORIES.map((category) => ({ category, threshold: 'BLOCK_NONE' }))
-        : undefined,
+      safetySettings: GEMINI_SAFETY_SETTINGS,
     };
     const res = await requestJson<GenerateResponse>(
       fetchFn,
@@ -58,6 +65,9 @@ export const googleAdapter: ProviderAdapter = {
       .filter((part) => !part.thought)
       .map((part) => part.text ?? '')
       .join('');
+    if (!text && cand.finishReason && BLOCKED_FINISH.includes(cand.finishReason)) {
+      throw new LlmError(`Gemini 的回覆被擋下（${cand.finishReason}）：這是 Google 端無法用安全設定關掉的限制，可以換個說法或改用其他模型`);
+    }
     return {
       text,
       usage: {

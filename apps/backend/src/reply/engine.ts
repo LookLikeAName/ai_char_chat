@@ -960,12 +960,12 @@ export class ReplyEngine {
   }
 
   private async generate(ctx: Ctx, situation: PromptSituation): Promise<ReplyOutput> {
-    const { system, chat, settings, allowEmpty } = await this.buildPrompt(ctx, situation);
+    const { system, chat, allowEmpty } = await this.buildPrompt(ctx, situation);
     const call = (extra: typeof chat = []) =>
       callWithBinding(
         this.deps,
         ctx.avatar.llm!,
-        { system, messages: [...chat, ...extra], json: true, relaxedSafety: settings.adultContent },
+        { system, messages: [...chat, ...extra], json: true },
         { purpose: 'reply', avatarId: ctx.avatar.id },
       );
 

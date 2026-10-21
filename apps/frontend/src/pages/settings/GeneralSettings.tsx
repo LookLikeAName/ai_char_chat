@@ -115,7 +115,7 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
           <span>允許成人內容</span>
         </label>
         <p className="hint">
-          雲端供應商（例如 Gemini）有各自的使用政策，可能仍會拒絕部分內容；需要時可以替個別 avatar 改綁限制較少的模型。所有 avatar 一律設定為成年人。
+          內容的尺度由這個開關決定。Gemini 可以調整的安全過濾一律設成不擋（避免正常的吐槽、吵架被誤判），但雲端供應商仍有關不掉的使用政策，可能拒絕部分內容；可以用下面的測試看看，需要時替個別 avatar 改綁限制較少的模型。所有 avatar 一律設定為成年人。
         </p>
         {s.adultContent && <AdultTestPanel />}
       </section>

@@ -12,8 +12,6 @@ export interface ChatRequest {
   params: LlmParams;
   /** 要求輸出 JSON；不支援的供應商只靠 prompt */
   json?: boolean;
-  /** 放寬供應商的安全過濾（成人內容開啟時），目前只有 Gemini 支援 */
-  relaxedSafety?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
 }

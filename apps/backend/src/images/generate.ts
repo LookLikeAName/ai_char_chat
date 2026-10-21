@@ -4,6 +4,7 @@
 // - OpenAI／OpenAI 相容：/images/generations
 import { requestJson, trimSlash } from '../llm/http.ts';
 import { LlmError, type FetchFn, type ResolvedLlm } from '../llm/index.ts';
+import { GEMINI_SAFETY_SETTINGS } from '../llm/providers/google.ts';
 
 export interface GeneratedImage {
   data: Buffer;
@@ -61,6 +62,7 @@ export async function generateImage(
           },
         ],
         generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspect } },
+        safetySettings: GEMINI_SAFETY_SETTINGS,
       },
       signal,
     });

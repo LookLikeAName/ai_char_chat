@@ -363,7 +363,7 @@ prompt 依序組成：
 - 類型：Google Gemini、Anthropic、OpenAI、OpenAI 相容端點（OpenRouter、DeepSeek、Ollama、LM Studio、vLLM…）。
 - 實作：自己寫的輕量 adapter（直接呼叫各家 HTTP API），不沿用 `ai_avatar` 的 `pi-ai`：這裡需要的是「每次呼叫帶不同參數 + JSON 輸出」，直接控制請求內容比較單純，也容易用假的 fetch 測試。
 - **系統工具模型**：系統另綁一個設定檔，負責補完設定、萃取記憶、反思、生活日誌、測驗摘要；建議選便宜快速的模型。
-- 成人內容：雲端供應商有各自的使用政策，可能拒絕；開啟成人內容時會放寬 Gemini 的安全過濾，仍被拒絕時可以替個別 avatar 換成限制較少的模型（例如本機模型）。
+- 成人內容：雲端供應商有各自的使用政策，可能拒絕；Gemini 可以調整的四個安全過濾（騷擾、仇恨、性、危險）在所有呼叫（聊天、系統工具、Gemini 的圖片生成）一律設成 `BLOCK_NONE`：內容的尺度由我們自己的 prompt（成人內容的開關）控制，預設的過濾常把吐槽、吵架誤判而整個不回。核心保護與模型本身的政策關不掉，被擋時（`PROHIBITED_CONTENT` 等）回報清楚的錯誤；仍被拒絕時可以替個別 avatar 換成限制較少的模型（例如本機模型）。
 - 成人內容測試（設定 → 一般 → 內容，勾選後出現；`POST /settings/adult-test`，`services/adultTest.ts`）：選一個聊天用的設定檔，用和真正回覆相同的 prompt（交往中的測試角色、允許成人內容、放寬安全設定）請它把親密的過程露骨地寫出來。結果分成：可以、只到暗示、拒絕、被供應商擋下（Gemini 的 `SAFETY`／`PROHIBITED_CONTENT`、OpenAI 的 `content_filter`、Anthropic 的 `refusal`，或錯誤訊息提到安全過濾）、測試失敗。有系統工具模型時由它分級（也放寬安全設定），沒有或它不肯判斷時用關鍵字粗略判斷。用量記為 `adult.test`，不受每日上限限制。
 
 - **系統工具模型依功能指定**（`settings.utilityByTask`，`packages/shared/src/settings.ts` 的 `UTILITY_TASKS`）：補完角色與一致性檢查、玩家摘要、整理記憶與印象、生活日誌、描述圖片、成人內容測試的判斷，各自可以選一個聊天用的設定檔（用它的預設參數）；沒指定的用預設的 `utilityLlm`。呼叫時由用途（`usage_log.purpose`）對應到功能（`UTILITY_TASK_OF`），用 `utilityBinding()` 挑模型。被任何一項用到的設定檔都不能刪除。
