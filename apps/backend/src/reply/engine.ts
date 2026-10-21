@@ -63,6 +63,8 @@ export interface ReplyEngineDeps {
   sleep?: (ms: number) => Promise<void>;
   random?: Random;
   now?: () => Date;
+  /** 補上停機期間的主動訊息：送出的訊息用 now() 的時間（模擬的時鐘），而不是現在 */
+  backdate?: boolean;
   /** 聊天圖片與 avatar 照片的檔案位置；沒給時不處理圖片 */
   mediaDir?: string;
 }
@@ -239,6 +241,7 @@ export class ReplyEngine {
           senderType: 'avatar',
           senderAvatarId: ctx.avatar.id,
           content: text,
+          ...this.stamp(),
           meta: {
             proactive: true,
             ...(output.traceId ? { traceId: output.traceId } : {}),
@@ -553,6 +556,7 @@ export class ReplyEngine {
             senderType: 'avatar',
             senderAvatarId: avatarId,
             content: text,
+            ...this.stamp(),
             meta: {
               proactive: true,
               ...(output.traceId ? { traceId: output.traceId } : {}),
@@ -661,6 +665,7 @@ export class ReplyEngine {
         senderType: 'avatar',
         senderAvatarId: ctx.avatar.id,
         content: '',
+        ...this.stamp(),
         meta: { image, ...(output.traceId ? { traceId: output.traceId } : {}), ...(opts.proactive ? { proactive: true } : {}) },
       });
       await logEvent({
@@ -921,6 +926,11 @@ export class ReplyEngine {
   }
 
   /** 群組成員：id → 顯示的名字與本名 */
+  /** 補上停機期間的訊息時，訊息時間用模擬的時鐘 */
+  private stamp(): { createdAt?: Date } {
+    return this.deps.backdate ? { createdAt: this.now() } : {};
+  }
+
   private async memberNames(conversationId: string): Promise<Map<string, { shown: string; names: string[] }>> {
     const rows = await this.deps.db
       .select({ id: avatars.id, name: avatars.name, displayName: avatars.displayName })

@@ -40,6 +40,8 @@ export async function postMessage(
     senderAvatarId?: string | null;
     content: string;
     meta?: MessageMeta;
+    /** 補上停機期間的訊息時用過去的時間；平常省略（用現在） */
+    createdAt?: Date;
   },
 ): Promise<MessageDto> {
   const row = await db.transaction(async (tx) => {
@@ -51,9 +53,13 @@ export async function postMessage(
         senderAvatarId: values.senderAvatarId ?? null,
         content: values.content,
         meta: values.meta ?? {},
+        ...(values.createdAt ? { createdAt: values.createdAt } : {}),
       })
       .returning();
-    await tx.update(conversations).set({ lastMessageAt: sql`now()` }).where(eq(conversations.id, values.conversationId));
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: values.createdAt ? sql`greatest(${conversations.lastMessageAt}, ${values.createdAt})` : sql`now()` })
+      .where(eq(conversations.id, values.conversationId));
     return m!;
   });
   const dto = messageToDto(row);

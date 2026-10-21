@@ -21,7 +21,7 @@ export async function proactiveTick(
   ctx: CallContext,
   settings: AppSettings,
   enqueue: (job: AgentJob, delayMs: number) => Promise<void>,
-  opts: { now?: Date; random?: () => number } = {},
+  opts: { now?: Date; random?: () => number; /** 補上停機期間時不記每一次的檢查 */ quiet?: boolean } = {},
 ): Promise<TickDecision[]> {
   const db: Db = ctx.db;
   const now = opts.now ?? new Date();
@@ -103,7 +103,7 @@ export async function proactiveTick(
   }
   decisions.push(...(await groupTick(db, settings, enqueue, now, random, clock, states)));
 
-  await logEvent({
+  if (!opts.quiet) await logEvent({
     category: 'proactive',
     type: 'proactive.tick',
     level: decisions.some((d) => d.action === 'enqueued') ? 'info' : 'debug',

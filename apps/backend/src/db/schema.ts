@@ -72,6 +72,14 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** 系統狀態（只有一列）：worker 最後一次還在運作的時間，用來知道停機了多久 */
+export const systemState = pgTable('system_state', {
+  id: smallint('id').primaryKey(),
+  workerSeenAt: timestamp('worker_seen_at', { withTimezone: true }),
+  /** 上一次補上停機期間主動訊息的時間與範圍 */
+  catchUp: jsonb('catch_up').$type<{ at: string; from: string; to: string; sent: number } | null>(),
+});
+
 /** 登入密碼（只有一列）。session_version 加一就能讓所有裝置登出 */
 export const authState = pgTable('auth_state', {
   id: smallint('id').primaryKey(),

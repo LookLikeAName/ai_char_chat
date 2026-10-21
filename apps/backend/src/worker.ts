@@ -9,6 +9,7 @@ import { avatars } from './db/schema.ts';
 import { RedisEventPublisher, WORKER_HEARTBEAT_KEY } from './events/bus.ts';
 import { AGENT_QUEUE, MEMORY_JOB_OPTIONS, REPLY_JOB_OPTIONS, type AgentJob } from './jobs.ts';
 import { RedisLock } from './lock.ts';
+import { catchUpProactive, catchUpWindow, lastWorkerSeen, markWorkerSeen } from './proactive/catchUp.ts';
 import { proactiveTick } from './proactive/tick.ts';
 import { embedderFromSettings } from './memory/embedder.ts';
 import { extractMemories } from './memory/extract.ts';
@@ -22,6 +23,8 @@ import { pruneChatMedia } from './services/media.ts';
 import { QuotaError } from './services/usage.ts';
 
 const HEARTBEAT_MS = 10_000;
+/** 多久記一次「worker 還在運作」 */
+const SEEN_MS = 60_000;
 /** 對話正被另一個工作處理時，多久後再試 */
 const BUSY_RETRY_MS = 3000;
 const KEEP = { removeOnComplete: 1000, removeOnFail: 1000 };
@@ -34,6 +37,17 @@ const queue = new Queue<AgentJob>(AGENT_QUEUE, { connection: redis });
 const events = new RedisEventPublisher(redis);
 const lock = new RedisLock(redis);
 const ctx = { db, box };
+/** 正在補上停機期間的主動訊息 */
+let catchingUp = false;
+
+/** 每次回覆後排一次記憶萃取；只有最後一次（對話真的停下來後）會有事做 */
+async function engineOnReplied(avatarId: string, conversationId: string) {
+  await queue.add('memory.extract', { kind: 'memory.extract', avatarId, conversationId }, {
+    ...MEMORY_JOB_OPTIONS,
+    ...KEEP,
+    delay: config.memoryIdleMs + 5000,
+  });
+}
 setupObservability(db, events, { console: true });
 
 const engine = new ReplyEngine({
@@ -45,14 +59,7 @@ const engine = new ReplyEngine({
   enqueue: async (job, delay) => {
     await queue.add(job.kind, job, { ...REPLY_JOB_OPTIONS, ...KEEP, delay });
   },
-  // 每次回覆後排一次記憶萃取；只有最後一次（對話真的停下來後）會有事做
-  onReplied: async (avatarId, conversationId) => {
-    await queue.add('memory.extract', { kind: 'memory.extract', avatarId, conversationId }, {
-      ...MEMORY_JOB_OPTIONS,
-      ...KEEP,
-      delay: config.memoryIdleMs + 5000,
-    });
-  },
+  onReplied: engineOnReplied,
 });
 
 async function handleExtract(avatarId: string, conversationId: string, force = false) {
@@ -108,6 +115,8 @@ async function processJob(data: AgentJob) {
     case 'maintenance':
       return maintenance();
     case 'proactive.tick': {
+      // 正在補停機期間的訊息：這次先不檢查，免得同時有兩個時間線
+      if (catchingUp) return 'catching-up';
       const settings = await loadSettings(db);
       const decisions = await proactiveTick(ctx, settings, (j, delay) =>
         queue.add(j.kind, j, { ...KEEP, delay, attempts: 1 }).then(() => undefined),
@@ -175,10 +184,34 @@ async function beat() {
 }
 await beat();
 const timer = setInterval(beat, HEARTBEAT_MS);
+
+// 記下 worker 最後還在運作的時間；下次啟動時用來知道停機了多久
+const seen = await lastWorkerSeen(db);
+await markWorkerSeen(db);
+const seenTimer = setInterval(() => void markWorkerSeen(db).catch(() => {}), SEEN_MS);
+void (async () => {
+  const window = catchUpWindow(await loadSettings(db), seen, new Date());
+  if (!window) return;
+  const token = await lock.acquire('proactive:catchup', 30 * 60 * 1000);
+  if (!token) return;
+  catchingUp = true;
+  try {
+    console.log(`[proactive] 停機期間 ${window.from.toISOString()} ～ ${window.to.toISOString()}，補上這段時間的主動訊息`);
+    const r = await catchUpProactive({ ...ctx, events, lock, mediaDir: config.mediaDir, onReplied: engineOnReplied }, await loadSettings(db), window);
+    console.log(`[proactive] 補上了 ${r.sent.length} 次主動訊息（檢查 ${r.ticks} 次）`);
+  } catch (err) {
+    console.error('[proactive] 補上停機期間的主動訊息失敗：', (err as Error).message);
+  } finally {
+    catchingUp = false;
+    await lock.release('proactive:catchup', token);
+  }
+})();
 console.log('[worker] 已啟動');
 
 async function shutdown() {
   clearInterval(timer);
+  clearInterval(seenTimer);
+  await markWorkerSeen(db).catch(() => {});
   await worker.close();
   await queue.close();
   await redis.del(WORKER_HEARTBEAT_KEY).catch(() => {});

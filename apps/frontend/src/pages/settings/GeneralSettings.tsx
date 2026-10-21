@@ -159,6 +159,21 @@ function GeneralForm({ initial }: { initial: AppSettings }) {
             <span className="hint">避開上面的勿擾時段與 avatar 睡覺的時間；關係越近、越外向、越久沒聊，越常找你。</span>
           </label>
         )}
+        {s.proactive.enabled && (
+          <>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={s.proactive.catchUp}
+                onChange={(e) => patch({ proactive: { ...s.proactive, catchUp: e.target.checked } })}
+              />
+              <span>系統沒開著的期間，啟動時補上那段時間的主動訊息</span>
+            </label>
+            <p className="hint">
+              停機超過 30 分鐘時，照平常的規則回頭檢查那段時間（最多最近 48 小時），決定要傳的就用那個時間點的情境寫訊息，訊息也標成那個時間，就像那時候傳來的。一次最多補 8 次，每次都要呼叫 LLM。
+            </p>
+          </>
+        )}
         <label className="check">
           <input
             type="checkbox"

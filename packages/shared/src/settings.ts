@@ -52,10 +52,10 @@ export const appSettingsSchema = z.object({
   adultContent: z.boolean().default(false),
   /** avatar 回覆的節奏：擬真（依作息）、輕鬆（縮短）、即時 */
   replyPacing: z.enum(['realistic', 'relaxed', 'instant']).default('realistic'),
-  /** avatar 主動傳訊息 */
+  /** avatar 主動傳訊息；catchUp：系統沒開著的期間，啟動時補上那段時間可能會收到的主動訊息 */
   proactive: z
-    .object({ enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(20) })
-    .default({ enabled: true, dailyLimit: 3 }),
+    .object({ enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(20), catchUp: z.boolean().default(true) })
+    .default({ enabled: true, dailyLimit: 3, catchUp: true }),
   /** 在聊天畫面顯示 avatar 的內心想法（偷看用，也方便調整角色） */
   showInnerThoughts: z.boolean().default(false),
   /** 系統工具模型：補完設定、萃取記憶、生活日誌…（預設，每個功能可以另外指定） */
