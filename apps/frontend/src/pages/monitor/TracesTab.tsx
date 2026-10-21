@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import type { TraceSummaryDto } from '@acc/shared';
+import { MANUAL_RETRY_HINTS, RETRYABLE_PURPOSES, type TraceSummaryDto } from '@acc/shared';
 import { JsonView } from '../../components/debug/JsonView.tsx';
 import { PromptView } from '../../components/debug/PromptView.tsx';
 import { Icon } from '../../components/Icon.tsx';
@@ -29,8 +29,11 @@ export function TracesTab() {
   useDebugStream((m) => {
     if (m.kind !== 'trace') return;
     const t = m.trace;
+    // 新的成功：之前同一件事失敗的呼叫就不用重來了
+    if (t.ok) setRows((r) => r.map((x) => (!x.ok && sameTask(x, t) ? { ...x, retry: 'superseded' } : x)));
     if ((purpose && t.purpose !== purpose) || (avatarId && t.avatarId !== avatarId) || (failed && t.ok)) return;
-    setRows((r) => [t, ...r].slice(0, 500));
+    const row = t.ok ? t : { ...t, retry: t.purpose in RETRYABLE_PURPOSES ? ('available' as const) : ('manual' as const) };
+    setRows((r) => [row, ...r].slice(0, 500));
   });
 
   return (
@@ -74,12 +77,13 @@ export function TracesTab() {
               <th className="num">輸出</th>
               <th className="num">延遲</th>
               <th>結果</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="hint">
+                <td colSpan={9} className="hint">
                   還沒有紀錄。
                 </td>
               </tr>
@@ -96,12 +100,53 @@ export function TracesTab() {
                 <td className="num">{t.outputTokens.toLocaleString()}</td>
                 <td className="num">{(t.latencyMs / 1000).toFixed(1)}s</td>
                 <td>{t.ok ? <span className="ok-text">成功</span> : <span className="warn-text" title={t.error ?? ''}>失敗</span>}</td>
+                <td>{!t.ok && <RetryButton trace={t} compact />}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+/** 同一件事：同用途、同 avatar、同對話 */
+function sameTask(a: TraceSummaryDto, b: TraceSummaryDto): boolean {
+  return a.purpose === b.purpose && a.avatarId === b.avatarId && a.conversationId === b.conversationId && b.createdAt > a.createdAt;
+}
+
+/** 失敗的呼叫：還沒有後續成功的話可以重新觸發；不能從這裡觸發的顯示該去哪裡 */
+function RetryButton({ trace, compact = false }: { trace: TraceSummaryDto; compact?: boolean }) {
+  const toast = useToast();
+  const [state, setState] = useState<'idle' | 'pending' | 'done'>('idle');
+  if (trace.retry === 'superseded') return <span className="hint">{compact ? '已有後續成功' : '之後已經有同一件事成功的呼叫，不需要重來'}</span>;
+  if (trace.retry === 'manual' || !trace.retry) {
+    const hint = MANUAL_RETRY_HINTS[trace.purpose] ?? '在原本的畫面重新操作';
+    return compact ? <span className="hint" title={hint}>—</span> : <span className="hint">{hint}</span>;
+  }
+  return (
+    <span className="row">
+      <button
+        type="button"
+        className="btn btn-small"
+        disabled={state !== 'idle'}
+        title={RETRYABLE_PURPOSES[trace.purpose]}
+        onClick={async () => {
+          setState('pending');
+          try {
+            const r = await api.debug.retryTrace(trace.id);
+            toast(r.message, 'success');
+            setState('done');
+          } catch (err) {
+            toast(errorText(err), 'error');
+            setState('idle');
+          }
+        }}
+      >
+        {state === 'pending' ? '處理中…' : state === 'done' ? '已重新觸發' : '重新呼叫'}
+      </button>
+      {!compact && <span className="hint">{RETRYABLE_PURPOSES[trace.purpose]}</span>}
+    </span>
   );
 }
 
@@ -155,6 +200,14 @@ export function TraceDetail() {
               <dd>{(t.latencyMs / 1000).toFixed(2)} 秒</dd>
               <dt>結果</dt>
               <dd>{t.ok ? <span className="ok-text">成功</span> : <span className="warn-text">失敗：{t.error}</span>}</dd>
+              {!t.ok && (
+                <>
+                  <dt>重新呼叫</dt>
+                  <dd>
+                    <RetryButton trace={t} />
+                  </dd>
+                </>
+              )}
             </dl>
           </section>
           {t.request.messages.length || t.request.system ? (

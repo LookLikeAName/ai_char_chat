@@ -7,9 +7,10 @@ import { avatars, conversationMembers, eventLog, llmTraces, usageLog } from '../
 import { notFound, parseBody } from '../errors.ts';
 import { embedderFromSettings } from '../memory/embedder.ts';
 import { retrieveMemories } from '../memory/store.ts';
-import { eventToDto, traceSummary } from '../observability.ts';
+import { eventToDto, logEvent, traceSummary, withScope } from '../observability.ts';
 import { ReplyEngine } from '../reply/engine.ts';
 import { loadSettings } from '../services/settings.ts';
+import { retryStatus, retryTrace } from '../services/traceRetry.ts';
 
 const listQuery = z.object({
   before: z.coerce.number().int().optional(),
@@ -87,7 +88,27 @@ export async function debugRoutes(app: FastifyInstance) {
       )
       .orderBy(desc(llmTraces.createdAt))
       .limit(q.limit);
-    return rows.map(traceSummary);
+    // 失敗的呼叫附上能不能重新觸發
+    return Promise.all(rows.map(async (r) => ({ ...traceSummary(r), retry: await retryStatus(db, r) })));
+  });
+
+  /** 重新觸發失敗的呼叫對應的工作（之後還沒有成功的呼叫時才可以） */
+  app.post('/debug/traces/:id/retry', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    const [row] = await db.select().from(llmTraces).where(eq(llmTraces.id, id));
+    if (!row) throw notFound('這筆 LLM 呼叫紀錄（可能已超過保留天數）');
+    const result = await withScope({ avatarId: row.avatarId ?? undefined, conversationId: row.conversationId ?? undefined }, () =>
+      retryTrace(app.deps, row),
+    );
+    await logEvent({
+      category: 'llm',
+      type: 'llm.retry',
+      avatarId: row.avatarId,
+      conversationId: row.conversationId,
+      message: `手動重新觸發失敗的呼叫（${row.purpose}）：${result.message}`,
+      data: { traceId: row.id },
+    });
+    return result;
   });
 
   app.get('/debug/traces/:id', async (req): Promise<TraceDto> => {
@@ -96,6 +117,7 @@ export async function debugRoutes(app: FastifyInstance) {
     if (!row) throw notFound('這筆 LLM 呼叫紀錄（可能已超過保留天數）');
     return {
       ...traceSummary(row),
+      retry: await retryStatus(db, row),
       params: row.params,
       request: row.request ?? { messages: [] },
       response: row.response,

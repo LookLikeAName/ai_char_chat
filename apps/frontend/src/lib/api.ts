@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  TraceRetryResultDto,
   SettingsFile,
   SettingsImportResultDto,
   AdultTestResult,
@@ -161,6 +162,7 @@ export const api = {
     traces: (params: Record<string, string | undefined>) =>
       request<TraceSummaryDto[]>('GET', `/api/debug/traces${query(params)}`),
     trace: (id: string) => request<TraceDto>('GET', `/api/debug/traces/${id}`),
+    retryTrace: (id: string) => request<TraceRetryResultDto>('POST', `/api/debug/traces/${id}/retry`),
     queue: () => request<QueueDto>('GET', '/api/debug/queue'),
     promote: (jobId: string) => request<{ ok: boolean }>('POST', `/api/debug/queue/${encodeURIComponent(jobId)}/promote`),
     replyNow: (conversationId: string) => request<{ ok: true }>('POST', `/api/debug/conversations/${conversationId}/reply-now`),

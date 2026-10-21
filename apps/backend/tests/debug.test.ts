@@ -203,4 +203,67 @@ describe.skipIf(!url)('監控', () => {
     a.terminate();
     b.terminate();
   });
+
+  describe('重新觸發失敗的呼叫', () => {
+    const trace = async (v: Partial<typeof llmTraces.$inferInsert> & { purpose: string; ok: boolean; createdAt?: Date }) =>
+      (
+        await db
+          .insert(llmTraces)
+          .values({ provider: 'openai-compatible', model: 'm', avatarId, conversationId, error: v.ok ? null : '供應商回應 500', ...v })
+          .returning()
+      )[0]!;
+    const list = async () => (await app.inject({ url: '/api/debug/traces?failed=true' })).json() as { id: string; retry?: string }[];
+    const retry = (id: string) => app.inject({ method: 'POST', url: `/api/debug/traces/${id}/retry` });
+
+    it('回覆失敗：有還沒回的訊息就重新回覆；之後有成功的就不能再觸發', async () => {
+      await db.insert(messages).values({ conversationId, senderType: 'user', content: '在嗎' });
+      const failed = await trace({ purpose: 'reply', ok: false, createdAt: new Date(Date.now() - 60_000) });
+      expect((await list()).find((t) => t.id === failed.id)!.retry).toBe('available');
+      const r = await retry(failed.id);
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ queued: true, message: '已排入：重新回覆' });
+      expect(jobs).toContainEqual({ kind: 'reply', conversationId, force: true });
+
+      // 之後同一件事成功了
+      await trace({ purpose: 'reply', ok: true });
+      expect((await list()).find((t) => t.id === failed.id)!.retry).toBe('superseded');
+      expect((await retry(failed.id)).statusCode).toBe(409);
+    });
+
+    it('沒有還沒回的訊息時，回覆失敗改成重新主動發話；記憶萃取排回佇列', async () => {
+      const failed = await trace({ purpose: 'reply', ok: false });
+      expect((await retry(failed.id)).json().message).toBe('已排入：重新主動傳訊息');
+      expect(jobs).toContainEqual({ kind: 'proactive', conversationId, avatarId });
+      // 另一個對話的成功不影響這一筆
+      await trace({ purpose: 'memory.extract', ok: true, conversationId: null });
+      const extract = await trace({ purpose: 'memory.extract', ok: false, createdAt: new Date(Date.now() - 60_000) });
+      expect((await list()).find((t) => t.id === extract.id)!.retry).toBe('available');
+      await retry(extract.id);
+      expect(jobs).toContainEqual({ kind: 'memory.extract', avatarId, conversationId, force: true });
+    });
+
+    it('補完角色之類的要在原本的畫面重來；成功的呼叫不能觸發', async () => {
+      const persona = await trace({ purpose: 'persona.generate', ok: false, avatarId: null, conversationId: null });
+      expect((await list()).find((t) => t.id === persona.id)!.retry).toBe('manual');
+      const r = await retry(persona.id);
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toContain('人格設定');
+      const ok = await trace({ purpose: 'reply', ok: true });
+      expect((await retry(ok.id)).statusCode).toBe(400);
+      expect(((await app.inject({ url: `/api/debug/traces/${persona.id}` })).json() as { retry: string }).retry).toBe('manual');
+    });
+
+    it('整理印象、玩家摘要直接重跑', async () => {
+      await saveSettings(db, appSettingsSchema.parse({ replyPacing: 'instant', utilityLlm: { profileId: (await db.select().from(llmProfiles))[0]!.id, params: {} } }));
+      await app.inject({ method: 'PUT', url: '/api/profile/preferences', payload: { nickname: '阿明' } });
+      const summary = await trace({ purpose: 'profile.summary', ok: false, avatarId: null, conversationId: null });
+      const r = await retry(summary.id);
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ queued: false, message: '已重新產生 profile 摘要' });
+      expect((await list()).find((t) => t.id === summary.id)!.retry).toBe('superseded');
+
+      const reflect = await trace({ purpose: 'memory.reflect', ok: false, conversationId: null });
+      expect((await retry(reflect.id)).json()).toMatchObject({ queued: false, message: '沒有新的記憶可以整理' });
+    });
+  });
 });
