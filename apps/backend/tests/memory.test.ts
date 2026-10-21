@@ -266,6 +266,41 @@ describe.skipIf(!url)('記憶與關係', () => {
     });
   });
 
+  describe('手動調整關係', () => {
+    it('直接設定階段與數值並記一筆；炮友要開成人內容；狀態附上親密的尺度', async () => {
+      const app = await buildApp({
+        db,
+        box,
+        events: { publish: async () => {} },
+        jobs: { add: async () => {} },
+        hub: new WsHub(),
+        mediaDir: mkdtempSync(path.join(tmpdir(), 'acc-media-')),
+      });
+      const patch = (payload: object) => app.inject({ method: 'PATCH', url: `/api/avatars/${avatarId}/relationship`, payload });
+      const r = await patch({ stage: 'crush', affinity: 60, romance: 50 });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ stage: 'crush', affinity: 60, trust: 10, romance: 50 });
+      const rel = await getRelationship(db, avatarId);
+      expect(rel.events.at(-1)!.note).toContain('手動調整：關係 stranger → crush、好感 0 → 60、心動 0 → 50');
+      expect((await patch({})).statusCode).toBe(400);
+      expect((await patch({ trust: 101 })).statusCode).toBe(400);
+
+      // 炮友：沒開成人內容不行（調整、重設、建立都一樣）
+      expect((await patch({ stage: 'fwb' })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url: `/api/avatars/${avatarId}/relationship/reset`, payload: { stage: 'fwb' } })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url: '/api/avatars', payload: { name: '新的', initialStage: 'fwb' } })).statusCode).toBe(400);
+      let state = (await app.inject({ url: `/api/avatars/${avatarId}/state` })).json();
+      expect(state.intimacy).toBeNull();
+
+      await app.inject({ method: 'PATCH', url: '/api/settings', payload: { adultContent: true } });
+      expect((await patch({ stage: 'fwb', trust: 45 })).statusCode).toBe(200);
+      state = (await app.inject({ url: `/api/avatars/${avatarId}/state` })).json();
+      expect(state.relationship).toMatchObject({ stage: 'fwb', affinity: 60, trust: 45 });
+      expect(state.intimacy).toBe('explicit');
+      await app.close();
+    });
+  });
+
   describe('狀態 API', () => {
     it('建立時設定初始關係、查詢狀態、刪除記憶、重設關係', async () => {
       const app = await buildApp({

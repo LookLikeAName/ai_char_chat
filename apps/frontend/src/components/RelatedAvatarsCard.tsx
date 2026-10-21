@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { INITIAL_STAGES, MAX_AVATAR_LINKS, shownName, STAGE_LABELS, type AvatarLink, type InitialStage } from '@acc/shared';
 import { api, qk } from '../lib/api.ts';
+import { useStageOptions } from '../lib/stages.ts';
 import { AvatarImage } from './AvatarImage.tsx';
 import { Icon } from './Icon.tsx';
 
@@ -24,6 +25,9 @@ export function RelatedAvatarsCard({
   const choices = others.filter((a) => !value.some((l) => l.avatarId === a.id));
   const me = selfName.trim() || '這個角色';
 
+  const { adult } = useStageOptions();
+  // 「炮友」只有開啟成人內容時才能選（已經設定的保留）
+  const stageOptions = (current: InitialStage) => INITIAL_STAGES.filter((s) => adult || s !== 'fwb' || s === current);
   const update = (id: string, p: Partial<AvatarLink>) => onChange(value.map((l) => (l.avatarId === id ? { ...l, ...p } : l)));
 
   if (!others.length && !value.length) return null;
@@ -56,7 +60,7 @@ export function RelatedAvatarsCard({
                       onChange={(e) => update(l.avatarId, { stage: e.target.value as InitialStage })}
                       aria-label={`和${a?.name ?? '這個角色'}一開始的關係`}
                     >
-                      {INITIAL_STAGES.map((st) => (
+                      {stageOptions(l.stage).map((st) => (
                         <option key={st} value={st}>
                           {STAGE_LABELS[st]}
                         </option>

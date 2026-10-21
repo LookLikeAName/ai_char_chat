@@ -3352,3 +3352,32 @@ fieldset.field {
 .utility-tasks .field + .field {
   margin-top: 14px;
 }
+
+.rel-adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rel-meter .field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rel-meter .narrow-input {
+  width: 72px;
+}
+
+.rel-meter input[type='range'] {
+  width: 100%;
+}
+
+.stage-fwb {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.persona-section-hint {
+  margin: 0 20px 4px;
+}

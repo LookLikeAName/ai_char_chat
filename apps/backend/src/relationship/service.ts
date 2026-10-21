@@ -12,7 +12,9 @@ import {
   type RelationshipEventRecord,
   type RelationshipEventType,
   type RelationshipState,
+  type Stage,
 } from '@acc/shared';
+import { HttpError } from '../errors.ts';
 import type { Db } from '../db/client.ts';
 import { avatarState, relationships } from '../db/schema.ts';
 
@@ -56,6 +58,48 @@ export async function getRelationship(
 export async function resetRelationship(db: Db, avatarId: string, stage: InitialStage, target = USER_TARGET) {
   await db.delete(relationships).where(and(eq(relationships.avatarId, avatarId), eq(relationships.target, target)));
   return getRelationship(db, avatarId, target, stage);
+}
+
+/** 「炮友」只有開啟成人內容時才能設定 */
+export function assertStageAllowed(stage: Stage, adultContent: boolean): void {
+  if (stage === 'fwb' && !adultContent) throw new HttpError(400, '「炮友」要先在設定開啟成人內容才能使用');
+}
+
+/** 手動調整：直接設定階段與數值，記一筆事件（不受升降階的規則限制） */
+export async function patchRelationship(
+  db: Db,
+  avatarId: string,
+  patch: { stage?: Stage; affinity?: number; trust?: number; romance?: number },
+  target = USER_TARGET,
+): Promise<RelationshipRow> {
+  const row = await getRelationship(db, avatarId, target);
+  const next = {
+    stage: patch.stage ?? row.stage,
+    affinity: patch.affinity ?? row.affinity,
+    trust: patch.trust ?? row.trust,
+    romance: patch.romance ?? row.romance,
+  };
+  const events = [...row.events];
+  const changes = [
+    next.stage !== row.stage ? `關係 ${row.stage} → ${next.stage}` : '',
+    next.affinity !== row.affinity ? `好感 ${row.affinity} → ${next.affinity}` : '',
+    next.trust !== row.trust ? `信任 ${row.trust} → ${next.trust}` : '',
+    next.romance !== row.romance ? `心動 ${row.romance} → ${next.romance}` : '',
+  ].filter(Boolean);
+  if (changes.length) {
+    events.push({
+      type: next.affinity < row.affinity ? 'conflict' : 'reconciled',
+      note: `手動調整：${changes.join('、')}`,
+      at: new Date().toISOString(),
+      ...(next.stage !== row.stage ? { from: row.stage, to: next.stage } : {}),
+    });
+  }
+  const [updated] = await db
+    .update(relationships)
+    .set({ ...next, events: events.slice(-MAX_EVENTS), updatedAt: new Date() })
+    .where(eq(relationships.id, row.id))
+    .returning();
+  return updated!;
 }
 
 /** 套用一次互動的結果；回傳新的狀態與是否換了階段 */

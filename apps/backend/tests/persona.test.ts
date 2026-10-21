@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appSettingsSchema, PERSONA_PATHS, setField, type PersonaDraft } from '@acc/shared';
+import { appSettingsSchema, PERSONA_PATHS, REQUIRED_PATHS, setField, type PersonaDraft } from '@acc/shared';
 import { renderPersona } from '../src/persona/describe.ts';
 import { generatePersona } from '../src/persona/generate.ts';
 import { checkPersona } from '../src/persona/check.ts';
@@ -183,8 +183,23 @@ describe('generatePersona', () => {
     const calls: string[] = [];
     const ctx = fakeCtx([JSON.stringify({ persona: SAMPLE_PERSONA })], calls);
     const res = await generatePersona(ctx, settings, { name: '小雨', bio: 'x', persona: {}, locks: [], seed: '毒舌店長' });
-    expect(res.filled).toHaveLength(PERSONA_PATHS.length);
+    // 沒開成人內容：「親密與性」不產生
+    expect(res.filled).toHaveLength(REQUIRED_PATHS.length);
+    expect(res.filled.some((p) => p.startsWith('intimacy.'))).toBe(false);
     expect(calls[0]).toContain('## 角色概念（玩家對這個角色的要求，描述的是角色本身，不是玩家）\n毒舌店長');
+    expect(calls[0]).not.toContain('intimacy');
+  });
+
+  it('開了成人內容：也產生「親密與性」，並要求照角色概念如實寫', async () => {
+    const calls: string[] = [];
+    const intimacy = { openness: 90, style: '喜歡用文字調情，也喜歡主導', limits: ['不在公共場合', '不拍照'] };
+    const ctx = fakeCtx([JSON.stringify({ persona: { ...SAMPLE_PERSONA, intimacy } })], calls);
+    const adult = { ...settings, adultContent: true };
+    const res = await generatePersona(ctx, adult, { name: '小雨', bio: 'x', persona: {}, locks: [], seed: '炮友' });
+    expect(res.filled).toHaveLength(PERSONA_PATHS.length);
+    expect(res.persona.intimacy).toEqual(intimacy);
+    expect(calls[0]).toContain('intimacy.openness');
+    expect(calls[0]).toContain('不要刻意淡化');
   });
 
   it('沒有設定系統工具模型時提示去設定', async () => {

@@ -124,6 +124,47 @@ describe('prompt：戀愛的部分數值夠才放出', () => {
   });
 });
 
+describe('prompt：親密的尺度（只有開啟成人內容時）', () => {
+  const persona = { ...SAMPLE_PERSONA, intimacy: { openness: 85, style: '喜歡用文字調情', limits: ['不拍照'] } };
+  const build = (relationship: object, adultContent: boolean, group = false) =>
+    buildSystemPrompt({
+      avatar: { name: '小雨', bio: '', persona },
+      user: { preferences: preferencesSchema.parse({ nickname: '阿明', romance: 'open' }), summary: '', results: { bigFive: null, attachment: null, values: null } },
+      state: { relationship: { stage: 'friend', affinity: 40, trust: 30, romance: 0, ...relationship } as never, mood: NEUTRAL_MOOD, memories: [], impression: null },
+      settings: { timezone: 'Asia/Taipei', adultContent },
+      history: [],
+      now: new Date('2026-10-19T04:00:00Z'),
+      ...(group
+        ? { group: { conversationId: 'g', title: '群', selfId: 's', members: [], userName: '阿明', discretion: 50 } }
+        : {}),
+    });
+
+  it('開啟時寫出最多到哪一層，以及開放程度、喜歡的方式與底線', () => {
+    const p = build({ stage: 'lover', affinity: 70, trust: 60, romance: 70 }, true);
+    expect(p).toContain('親密的尺度最多到「露骨」');
+    expect(p).toContain('你對性的開放程度：85/100');
+    expect(p).toContain('你的親密底線（任何情況都不做）：不拍照');
+    // 不再出現在一般的人格設定段落裡
+    expect(p.match(/喜歡用文字調情/g)).toHaveLength(1);
+    expect(build({ stage: 'lover', affinity: 70, trust: 60, romance: 70 }, true, true)).toContain('最多到「調情、暗示」');
+  });
+  it('朋友、很開放、數值夠：可以說好當炮友；炮友可以結束', () => {
+    expect(build({ affinity: 50, trust: 40 }, true)).toContain('became_fwb');
+    expect(build({ affinity: 50, trust: 40 }, false)).not.toContain('became_fwb');
+    const fwb = build({ stage: 'fwb', affinity: 50, trust: 45, romance: 10 }, true);
+    expect(fwb).toContain('## 你們的關係：炮友');
+    expect(fwb).toContain('ended_fwb');
+  });
+  it('關閉時：不寫露骨的內容、不提親密與性，炮友當作好友', () => {
+    const p = build({ stage: 'fwb', affinity: 60, trust: 55, romance: 10 }, false);
+    expect(p).toContain('不寫露骨的性內容');
+    expect(p).not.toContain('炮友');
+    expect(p).not.toContain('開放程度');
+    expect(p).not.toContain('喜歡用文字調情');
+    expect(p).toContain('## 你們的關係：好友');
+  });
+});
+
 describe('bigramSimilarity', () => {
   it('中文以雙連詞比較', () => {
     expect(bigramSimilarity('下週要去面試', '面試準備得怎樣')).toBeGreaterThan(0);

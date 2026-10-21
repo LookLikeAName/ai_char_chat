@@ -1,7 +1,7 @@
 // 相關的角色（例如同一間公司的同事）：存成無方向的一對，關係描述雙方共用。
 // 用在三個地方：產生／檢查人格設定時當參考、聊天時讓 avatar 知道自己認識誰、群組成員列表。
 import { eq, inArray, or } from 'drizzle-orm';
-import { STAGE_LABELS, type AvatarLink, type InitialStage, type PersonaDraft } from '@acc/shared';
+import { STAGE_LABELS, visibleStage, type AvatarLink, type InitialStage, type PersonaDraft } from '@acc/shared';
 import type { Db } from '../db/client.ts';
 import { avatarLinks, avatars } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
@@ -78,13 +78,13 @@ export async function linkedAvatars(db: Db, links: AvatarLink[]): Promise<Linked
 }
 
 /** 一個角色的重點：年齡、職業、住哪、家人、個性、說話方式、作息、和玩家的關係 */
-export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full'): string {
+export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full', adultContent = true): string {
   const p = a.persona;
   const b = p.basic ?? {};
   const head = [b.age ? `${b.age} 歲` : '', b.gender ?? '', b.occupation ?? ''].filter(Boolean).join('、');
   const lines = [
     `### ${a.name}${head ? `（${head}）` : ''}`,
-    a.displayName && a.displayName !== a.name ? `通訊軟體上的顯示名稱：${a.displayName}` : '',     `你們的關係：${a.relation}（${STAGE_LABELS[a.stage]}）`,
+    a.displayName && a.displayName !== a.name ? `通訊軟體上的顯示名稱：${a.displayName}` : '',     `你們的關係：${a.relation}（${STAGE_LABELS[visibleStage(a.stage, adultContent)]}）`,
     a.bio ? `簡介：${a.bio}` : '',
   ];
   if (detail === 'full') {
@@ -106,9 +106,9 @@ export function describeLinked(a: LinkedAvatar, detail: 'brief' | 'full'): strin
 }
 
 /** 產生、檢查人格設定時附上的參考角色段落 */
-export async function referenceSection(db: Db, refs: AvatarLink[]): Promise<string> {
+export async function referenceSection(db: Db, refs: AvatarLink[], adultContent = true): Promise<string> {
   const list = await linkedAvatars(db, refs);
   if (!list.length) return '';
   return `# 相關的角色（已經存在，新的設定要和他們一致）
-${list.map((a) => describeLinked(a, 'full')).join('\n\n')}`;
+${list.map((a) => describeLinked(a, 'full', adultContent)).join('\n\n')}`;
 }

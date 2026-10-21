@@ -15,6 +15,7 @@ import {
   chooseSpeakers,
   GROUP_MESSAGE_BUDGET,
   localClock,
+  intimacyLevel,
   mentions,
   romanceOpen,
   shownName,
@@ -866,6 +867,15 @@ export class ReplyEngine {
         situation,
         relationship: relationshipState(relationship),
         romanceOpen: romanceOpen(relationshipState(relationship), profile.preferences?.romance),
+        intimacy: settings.adultContent
+          ? intimacyLevel({
+              relationship: relationshipState(relationship),
+              openness: ctx.avatar.persona.intimacy?.openness,
+              mood,
+              romancePref: profile.preferences?.romance,
+              inGroup: !!group,
+            })
+          : null,
         mood,
         memories: memories.length,
         embedder: embedder?.model ?? null,

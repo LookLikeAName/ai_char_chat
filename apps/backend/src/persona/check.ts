@@ -1,6 +1,7 @@
 // 一致性檢查：找出彼此矛盾的欄位，並提出只修改未鎖定欄位的建議。
 import {
   fieldSchema,
+  isOptionalField,
   PERSONA_PATHS,
   sanitizeDraft,
   type AppSettings,
@@ -25,12 +26,13 @@ export async function checkPersona(
 ): Promise<PersonaIssue[]> {
   const { draft } = sanitizeDraft(input.persona);
   const locks = new Set(input.locks);
-  const references = await referenceSection(ctx.db, input.references ?? []);
+  const adult = settings.adultContent;
+  const references = await referenceSection(ctx.db, input.references ?? [], adult);
   const content = `# 角色：${input.name || '（未命名）'}
 簡介：${input.bio || '（沒有）'}${input.userStage ? `\n這個角色和玩家（會和角色聊天的遊戲使用者）目前的關係：${STAGE_LABELS[input.userStage]}（relationship 區塊寫得比這更熟或更陌生也算矛盾）` : ''}
 
 # 設定
-${JSON.stringify(flatten(draft as never, PERSONA_PATHS), null, 1)}
+${JSON.stringify(flatten(draft as never, adult ? PERSONA_PATHS : PERSONA_PATHS.filter((p) => !isOptionalField(p))), null, 1)}
 
 # 鎖定的欄位（不能修改）
 ${[...locks].join('、') || '（沒有）'}

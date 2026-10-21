@@ -1,11 +1,13 @@
 // Avatar creator 的人格設定：逐欄編輯、鎖定、AI 補完、重新產生、一致性檢查。
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   fieldMeta,
   isFieldFilled,
   missingFields,
   PERSONA_PATHS,
   PERSONA_SECTIONS,
+  REQUIRED_PATHS,
   getField,
   setField,
   type AvatarLink,
@@ -15,7 +17,7 @@ import {
   type SectionMeta,
   type Stage,
 } from '@acc/shared';
-import { api } from '../../lib/api.ts';
+import { api, qk } from '../../lib/api.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
 import { FieldInput } from './FieldInput.tsx';
 
@@ -50,7 +52,11 @@ export function PersonaEditor({ value, onChange, references = [], userStage }: P
 
   const { persona, locks } = value;
   const missing = missingFields(persona);
-  const filledCount = PERSONA_PATHS.length - missing.length;
+  const filledCount = REQUIRED_PATHS.length - missing.length;
+  // 「親密與性」只有開啟成人內容時才出現
+  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
+  const sections = PERSONA_SECTIONS.filter((s) => !s.optional || settings?.adultContent);
+  const visiblePaths = PERSONA_PATHS.filter((p) => sections.some((s) => p.startsWith(`${s.key}.`)));
   const lockSet = new Set(locks);
 
   const setFieldValue = (path: PersonaPath, v: unknown) => {
@@ -123,11 +129,11 @@ export function PersonaEditor({ value, onChange, references = [], userStage }: P
     <div className="persona">
       <section className="card persona-toolbar">
         <div className="persona-progress">
-          <div className="progress-bar" role="progressbar" aria-valuenow={filledCount} aria-valuemax={PERSONA_PATHS.length}>
-            <span style={{ width: `${(filledCount / PERSONA_PATHS.length) * 100}%` }} />
+          <div className="progress-bar" role="progressbar" aria-valuenow={filledCount} aria-valuemax={REQUIRED_PATHS.length}>
+            <span style={{ width: `${(filledCount / REQUIRED_PATHS.length) * 100}%` }} />
           </div>
           <span className="hint">
-            已填 {filledCount} / {PERSONA_PATHS.length} 個欄位{locks.length ? ` · 鎖定 ${locks.length} 個` : ''}
+            已填 {filledCount} / {REQUIRED_PATHS.length} 個欄位{locks.length ? ` · 鎖定 ${locks.length} 個` : ''}
           </span>
         </div>
 
@@ -146,18 +152,18 @@ export function PersonaEditor({ value, onChange, references = [], userStage }: P
               disabled={!!busy}
               onClick={() => generate('產生角色中…（約需 30–60 秒）', { seed })}
             >
-              {missing.length === PERSONA_PATHS.length ? '產生角色' : `AI 補完 ${missing.length} 個欄位`}
+              {missing.length === REQUIRED_PATHS.length ? '產生角色' : `AI 補完 ${missing.length} 個欄位`}
             </button>
           ) : (
             <button
               type="button"
               className="btn"
-              disabled={!!busy || locks.length === PERSONA_PATHS.length}
+              disabled={!!busy || visiblePaths.every((p) => lockSet.has(p))}
               onClick={() => {
                 if (confirm('要依照目前的描述，重新產生所有沒鎖定的欄位嗎？')) {
                   void generate('重新產生中…（約需 30–60 秒）', {
                     seed,
-                    only: PERSONA_PATHS.filter((p) => !lockSet.has(p)),
+                    only: visiblePaths.filter((p) => !lockSet.has(p)),
                   });
                 }
               }}
@@ -218,7 +224,7 @@ export function PersonaEditor({ value, onChange, references = [], userStage }: P
         </section>
       )}
 
-      {PERSONA_SECTIONS.map((section) => (
+      {sections.map((section) => (
         <Section
           key={section.key}
           section={section}
@@ -278,9 +284,13 @@ function Section({
             {open ? '▾' : '▸'}
           </span>
           <h2>{section.label}</h2>
-          <span className={`tag${filled < paths.length ? ' tag-warn' : ''}`}>
-            {filled}/{paths.length}
-          </span>
+          {section.optional ? (
+            <span className="tag">選填</span>
+          ) : (
+            <span className={`tag${filled < paths.length ? ' tag-warn' : ''}`}>
+              {filled}/{paths.length}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -292,6 +302,7 @@ function Section({
           ↻ 重新產生這區
         </button>
       </header>
+      {open && section.hint && <p className="hint persona-section-hint">{section.hint}</p>}
       {open && (
         // AI 產生中鎖住輸入，避免結果回來時蓋掉剛改的內容
         <fieldset className="persona-fields" disabled={busy}>

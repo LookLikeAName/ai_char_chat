@@ -99,10 +99,11 @@ export function renderPersona(persona: Persona, skip: PersonaPath[] = []): strin
     const lines = Object.keys(section.fields)
       .map((f) => `${section.key}.${f}`)
       .filter((p) => !skip.includes(p))
-      .map((p) => {
+      .flatMap((p) => {
         const [s, f] = p.split('.') as [keyof Persona, string];
-        const v = (persona[s] as Record<string, unknown>)[f];
-        return `- ${fieldMeta(p)!.label}：${formatValue(p, v)}`;
+        // 選填的區塊可能沒有
+        const v = (persona[s] as Record<string, unknown> | undefined)?.[f];
+        return v === undefined ? [] : [`- ${fieldMeta(p)!.label}：${formatValue(p, v)}`];
       });
     return lines.length ? `## ${section.label}\n${lines.join('\n')}` : '';
   })

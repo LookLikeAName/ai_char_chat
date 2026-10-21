@@ -1,10 +1,17 @@
 // 組出一對一回覆的 prompt。順序：角色設定（固定，利於快取）→ 規則 → 現在的情境 → 對話紀錄。
 import {
+  canBecomeFwb,
+  canBecomeLovers,
   canHaveCrush,
   currentBlock,
   ENUM_OPTIONS,
   EVENT_HINTS,
   eventsSoFar,
+  INTIMACY_GUIDANCE,
+  INTIMACY_LABELS,
+  INTIMACY_LEVELS,
+  intimacyLevel,
+  visibleStage,
   localClock,
   personaSchema,
   romanceGuidance,
@@ -17,6 +24,7 @@ import {
   type AppSettings,
   type AssessmentResults,
   type ContentPart,
+  type IntimacyLevel,
   type LifeLogEvent,
   type Mood,
   type Persona,
@@ -188,7 +196,8 @@ export function completePersona(draft: PersonaDraft): Persona | null {
   return r.success ? r.data : null;
 }
 
-export function buildSystemPrompt(input: ReplyPromptInput): string {
+export function buildSystemPrompt(raw: ReplyPromptInput): string {
+  const input = adultOnly(raw);
   const { avatar, settings, now, history, user, state, situation, lifeLog, group, photos, acquaintances } = input;
   const stage: Stage = state?.relationship.stage ?? 'acquaintance';
   const persona = completePersona(avatar.persona);
@@ -200,9 +209,22 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
   const before = history[i];
   const sinceLast = before ? now.getTime() - before.createdAt.getTime() : null;
 
-  const content = settings.adultContent
-    ? '允許成人內容。你和對方都是成年人；是否發展到親密或露骨的內容，取決於你的個性、你們的關係和當下的氣氛，你可以拒絕。'
-    : '不寫露骨的性內容。對方往這個方向帶時，用符合你個性的方式婉拒、害羞帶過或轉移話題。';
+  // 親密的尺度：程式依關係、數值、開放程度與心情決定最多到哪裡，只放那一層的說明
+  const intimacy =
+    settings.adultContent && state
+      ? intimacyLevel({
+          relationship: state.relationship,
+          openness: persona?.intimacy?.openness,
+          mood: state.mood,
+          romancePref: user?.preferences.romance,
+          inGroup: !!group,
+        })
+      : null;
+  const content = !settings.adultContent
+    ? '不寫露骨的性內容。對方往這個方向帶時，用符合你個性的方式婉拒、害羞帶過或轉移話題。'
+    : intimacy
+      ? intimacyRule(intimacy, persona, !!group)
+      : '允許成人內容。你和對方都是成年人；是否發展到親密或露骨的內容，取決於你的個性、你們的關係和當下的氣氛，你可以拒絕。';
 
   const clock = localClock(now, settings.timezone);
   const block = persona ? currentBlock(persona.routine.schedule, clock.weekend, clock.hhmm) : null;
@@ -223,7 +245,7 @@ export function buildSystemPrompt(input: ReplyPromptInput): string {
 
 # 你的設定
 ${avatar.bio || '（沒有額外描述）'}
-${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser'])}\n` : ''}
+${persona ? `\n${renderPersona(persona, ['relationship.withUser', 'relationship.callsUser', ...INTIMACY_PATHS])}\n` : ''}
 # 你和對方
 ${relationship}
 ${state ? `\n${stateSection(state, user, now, settings.timezone, group, persona)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}${acquaintanceSection(acquaintances, group)}
@@ -249,7 +271,7 @@ ${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想�
             ? '\n- romance_delta：這段互動讓你對對方心動了多少（戀愛方面的感覺，和好感不同）：被撩到、心跳加速、覺得對方很有魅力就 +；只是朋友般的愉快就是 0；被冷落、對方提到喜歡別人就 -。對方不是你會喜歡的類型（例如性傾向不合）時不會增加。'
             : ''
         }
-- relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：${possibleEvents(state.relationship, romance)
+- relationship_event：平常是 null；只有這次對話中真的發生了下列的事才填 {"type": "…", "note": "一句話說明"}：${possibleEvents(state.relationship, romance, intimacy)
           .map((e) => `${e}（${EVENT_HINTS[e]}）`)
           .join('、')}。`
       : ''
@@ -299,11 +321,18 @@ function romanceTopics(r: RelationshipState): string {
 }
 
 /** 現在可能發生的關係事件（只列出這些給 LLM） */
-function possibleEvents(r: RelationshipState, romance: boolean): RelationshipEventType[] {
+function possibleEvents(r: RelationshipState, romance: boolean, intimacy: IntimacyLevel | null): RelationshipEventType[] {
   const out: RelationshipEventType[] = [];
-  if (r.stage === 'ex') {
+  // 說好當炮友：開了成人內容、尺度到得了親密接觸、數值也夠
+  const fwb = !!intimacy && INTIMACY_LEVELS.indexOf(intimacy) >= 2 && canBecomeFwb(r);
+  if (r.stage === 'fwb') {
+    if (romance && canHaveCrush(r)) out.push('mutual_feelings');
+    if (romance && canBecomeLovers(r)) out.push('avatar_confessed');
+    out.push('confession_accepted', 'confession_rejected', 'ended_fwb');
+  } else if (r.stage === 'ex') {
     if (romance) out.push('got_back_together');
     out.push('moved_on');
+    if (fwb) out.push('became_fwb');
   } else if (r.stage === 'lover') {
     out.push('breakup');
   } else {
@@ -311,6 +340,7 @@ function possibleEvents(r: RelationshipState, romance: boolean): RelationshipEve
     if (romance && r.stage === 'crush') out.push('avatar_confessed');
     out.push('confession_accepted', 'confession_rejected');
     if (r.stage === 'crush') out.push('breakup');
+    if (fwb) out.push('became_fwb');
   }
   out.push('conflict', 'reconciled');
   return out;
@@ -419,6 +449,36 @@ function memoryMark(visibility: string | undefined, group: PromptGroup | null | 
   if (visibility === 'private') return '（私下得知）';
   if (visibility.startsWith('group:') && visibility !== `group:${group.conversationId}`) return '（在別的群組聽說）';
   return '';
+}
+
+const INTIMACY_PATHS = ['intimacy.openness', 'intimacy.style', 'intimacy.limits'];
+
+/** 成人內容關閉時：「炮友」一律當作好友，avatar 不會看到這個關係 */
+function adultOnly(input: ReplyPromptInput): ReplyPromptInput {
+  const adult = input.settings.adultContent;
+  if (adult) return input;
+  const fix = <T extends { stage: Stage }>(r: T): T => ({ ...r, stage: visibleStage(r.stage, false) });
+  return {
+    ...input,
+    state: input.state ? { ...input.state, relationship: fix(input.state.relationship) } : input.state,
+    group: input.group
+      ? { ...input.group, members: input.group.members.map((m) => (m.relationship ? { ...m, relationship: fix(m.relationship) } : m)) }
+      : input.group,
+    acquaintances: input.acquaintances?.map((a) => (a.stage ? { ...a, stage: visibleStage(a.stage, false) } : a)),
+  };
+}
+
+/** 成人內容開啟時的親密規則：最多到哪一層、自己的開放程度、喜歡的方式與底線 */
+function intimacyRule(level: IntimacyLevel, persona: Persona | null, inGroup: boolean): string {
+  const it = persona?.intimacy;
+  const about = [
+    it?.openness !== undefined ? `你對性的開放程度：${it.openness}/100` : '',
+    it?.style ? `你喜歡的親密方式：${it.style}` : '',
+    it?.limits?.length ? `你的親密底線（任何情況都不做）：${it.limits.join('、')}` : '',
+  ].filter(Boolean);
+  return `允許成人內容，你和對方都是成年人。以你們現在的關係、你的個性和心情，親密的尺度最多到「${INTIMACY_LABELS[level]}」：${INTIMACY_GUIDANCE[level]}${
+    inGroup ? '（這是群組，大家都看得到。）' : ''
+  }${about.length ? `\n  ${about.join('\n  ')}` : ''}`;
 }
 
 /** 戀愛的部分：性傾向與對方的性別（讓模型判斷會不會心動） */

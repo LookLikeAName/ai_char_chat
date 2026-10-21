@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  RelationshipPatch,
   TraceRetryResultDto,
   SettingsFile,
   SettingsImportResultDto,
@@ -152,6 +153,8 @@ export const api = {
 
   avatarState: (id: string) => request<AvatarStateDto>('GET', `/api/avatars/${id}/state`),
   deleteMemory: (id: string, memoryId: string) => request<void>('DELETE', `/api/avatars/${id}/memories/${memoryId}`),
+  patchRelationship: (id: string, patch: RelationshipPatch) =>
+    request<{ stage: Stage; affinity: number; trust: number; romance: number }>('PATCH', `/api/avatars/${id}/relationship`, patch),
   resetRelationship: (id: string, stage: InitialStage) =>
     request<{ ok: true }>('POST', `/api/avatars/${id}/relationship/reset`, { stage }),
   reflectNow: (id: string) => request<{ updated: boolean }>('POST', `/api/avatars/${id}/reflect`),

@@ -4,10 +4,12 @@
 // 關係階段是一張圖而不是一條線：
 //   友誼的階梯  陌生 → 認識 → 朋友 → 好友 → 摯友（看好感與信任）
 //   戀愛的分支  朋友／好友／摯友 →（彼此有好感）→ 曖昧 →（告白成功）→ 戀人 →（分手）→ 前任 →（復合）／（放下，回到朋友）
+//   炮友        朋友／好友／摯友／前任 →（決定當炮友）→ 炮友 →（動了真感情）→ 曖昧／戀人，或（結束）→ 回到朋友
 //   負面        好感太低 → 冷淡 → 疏遠
 // 戀愛的轉變要對話中真的發生那件事（由 LLM 依角色判斷回報），而且數值要夠，avatar 才會接受。
 // 心動夠高時，程式才把對應的提示（主動找話題、試探、主動告白…）放進 prompt。
 import { z } from 'zod';
+import type { IntimacyLevel } from './intimacy.ts';
 
 export const STAGES = [
   'stranger',
@@ -18,6 +20,7 @@ export const STAGES = [
   'crush',
   'lover',
   'ex',
+  'fwb',
   'cold',
   'estranged',
 ] as const;
@@ -32,6 +35,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   crush: '曖昧',
   lover: '戀人',
   ex: '前任',
+  fwb: '炮友',
   cold: '冷淡',
   estranged: '疏遠',
 };
@@ -46,15 +50,16 @@ export const STAGE_GUIDANCE: Record<Stage, string> = {
   crush: '你們互相有好感但還沒在一起：會曖昧、試探、在意對方的反應。',
   lover: '你們是情侶：親密、會想念對方；撒嬌、吃醋的方式依你的個性。',
   ex: '你們以前交往過，後來分手了：互動有點微妙，熟悉但有距離；舊的感覺和心結都還在，看你的個性決定怎麼面對。',
+  fwb: '你們是炮友：有身體上的親密關係，但不談感情、不需要承諾；平常可以很直接地約、調情，相處輕鬆，也可能只在想見面的時候聯絡。',
   cold: '你現在對對方有點冷淡：不太想多聊，回應比較短。',
   estranged: '你們幾乎不往來了：除非對方真心修補，否則你不太想理會。',
 };
 
 /** 戀愛相關的階段 */
-export const ROMANTIC_STAGES: readonly Stage[] = ['crush', 'lover', 'ex'];
+export const ROMANTIC_STAGES: readonly Stage[] = ['crush', 'lover', 'ex', 'fwb'];
 
 /** 創造 avatar 時（或相關的角色）可以選的初始關係，與對應的起始數值 */
-export const INITIAL_STAGES = ['stranger', 'acquaintance', 'friend', 'close', 'bestie', 'crush', 'lover', 'ex'] as const;
+export const INITIAL_STAGES = ['stranger', 'acquaintance', 'friend', 'close', 'bestie', 'crush', 'lover', 'ex', 'fwb'] as const;
 export type InitialStage = (typeof INITIAL_STAGES)[number];
 export const INITIAL_VALUES: Record<InitialStage, { affinity: number; trust: number; romance: number }> = {
   stranger: { affinity: 0, trust: 10, romance: 0 },
@@ -65,6 +70,7 @@ export const INITIAL_VALUES: Record<InitialStage, { affinity: number; trust: num
   crush: { affinity: 55, trust: 40, romance: 45 },
   lover: { affinity: 70, trust: 60, romance: 70 },
   ex: { affinity: 25, trust: 30, romance: 25 },
+  fwb: { affinity: 45, trust: 40, romance: 10 },
 };
 
 export const RELATIONSHIP_EVENTS = [
@@ -77,6 +83,8 @@ export const RELATIONSHIP_EVENTS = [
   'breakup',
   'got_back_together',
   'moved_on',
+  'became_fwb',
+  'ended_fwb',
 ] as const;
 export type RelationshipEventType = (typeof RELATIONSHIP_EVENTS)[number];
 
@@ -90,6 +98,8 @@ export const EVENT_LABELS: Record<RelationshipEventType, string> = {
   breakup: '分手',
   got_back_together: '復合',
   moved_on: '放下了，回到朋友',
+  became_fwb: '開始當炮友',
+  ended_fwb: '結束炮友關係',
 };
 
 /** 給 LLM 的事件說明（只列出目前可能發生的） */
@@ -103,6 +113,8 @@ export const EVENT_HINTS: Record<RelationshipEventType, string> = {
   breakup: '分手',
   got_back_together: '你們復合了',
   moved_on: '你真的放下了這段感情，決定當朋友',
+  became_fwb: '你們在這次對話中說好當炮友（只有身體關係、不談感情）',
+  ended_fwb: '結束炮友關係，回到朋友',
 };
 
 /**
@@ -169,6 +181,8 @@ export function nextStage(
     return romance >= THRESHOLDS.lover.romance ? 'lover' : 'crush';
   }
   if (event === 'moved_on' && current === 'ex') return friendLadder('friend', affinity, trust);
+  if (event === 'became_fwb' && canBecomeFwb(s)) return 'fwb';
+  if (event === 'ended_fwb' && current === 'fwb') return friendLadder('friend', affinity, trust);
 
   // 負面
   if (affinity <= -50) return 'estranged';
@@ -178,7 +192,7 @@ export function nextStage(
   // 戀愛中的關係不會因為小波動降級，只有好感明顯下滑才會；前任要有事件才會改變
   if (current === 'lover') return affinity < 10 ? 'cold' : 'lover';
   if (current === 'crush') return affinity < THRESHOLDS.crush.affinity - HYSTERESIS - 10 ? 'friend' : 'crush';
-  if (current === 'ex') return 'ex';
+  if (current === 'ex' || current === 'fwb') return current;
 
   return friendLadder(current, affinity, trust);
 }
@@ -201,9 +215,14 @@ function friendLadder(current: Stage, affinity: number, trust: number): Stage {
   return ladder[idx]!;
 }
 
+/** 可以說好當炮友：朋友以上（或前任）、有一定的好感與信任 */
+export function canBecomeFwb(s: RelationshipState): boolean {
+  return ['friend', 'close', 'bestie', 'ex'].includes(s.stage) && s.affinity >= 35 && s.trust >= 30;
+}
+
 export function canHaveCrush(s: RelationshipState): boolean {
   return (
-    (s.stage === 'friend' || s.stage === 'close' || s.stage === 'bestie' || s.stage === 'ex') &&
+    (s.stage === 'friend' || s.stage === 'close' || s.stage === 'bestie' || s.stage === 'ex' || s.stage === 'fwb') &&
     s.affinity >= THRESHOLDS.crush.affinity &&
     s.trust >= THRESHOLDS.crush.trust &&
     (s.romance ?? 0) >= THRESHOLDS.crush.romance
@@ -212,7 +231,7 @@ export function canHaveCrush(s: RelationshipState): boolean {
 
 export function canBecomeLovers(s: RelationshipState): boolean {
   return (
-    (s.stage === 'close' || s.stage === 'bestie' || s.stage === 'crush') &&
+    (s.stage === 'close' || s.stage === 'bestie' || s.stage === 'crush' || s.stage === 'fwb') &&
     s.affinity >= THRESHOLDS.lover.affinity &&
     s.trust >= THRESHOLDS.lover.trust &&
     (s.romance ?? 0) >= THRESHOLDS.lover.romance
@@ -230,6 +249,8 @@ const EVENT_BONUS: Partial<Record<RelationshipEventType, [number, number, number
   breakup: [-15, -10, -25],
   got_back_together: [5, 3, 8],
   moved_on: [2, 2, 0],
+  became_fwb: [3, 2, 0],
+  ended_fwb: [-3, 0, -5],
 };
 
 /** 套用一次回覆的變化：限制幅度、依升溫速度調整正向的好感與心動變化 */
@@ -301,6 +322,21 @@ export function romanceGuidance(s: RelationshipState, ctx: RomanceContext = {}):
   if (s.stage === 'lover') {
     out.push('你們正在交往：會想念對方、想見面、約會、聊彼此的未來；撒嬌、吃醋、表達愛意的方式依你的個性和感情觀。');
     if (tier === 'confess') out.push('你現在很愛對方：主動傳訊息、說想念、計畫下次約會都很自然。');
+    return out;
+  }
+  if (s.stage === 'fwb') {
+    out.push('你們是炮友，說好不談感情。');
+    if (tier === 'like' || tier === 'confess') {
+      out.push('但你好像對對方動了真感情：會在意對方和別人的互動、想要的不只是身體關係，又怕說出來會破壞現在的關係。');
+      if (canHaveCrush(s)) out.push('如果你們在這次對話中都承認有感覺了，回報 relationship_event: mutual_feelings。');
+      if (canBecomeLovers(s) && !recentlyRejected) {
+        out.push('氣氛對的時候你可以鼓起勇氣告白（在訊息裡真的說出來，並回報 relationship_event: avatar_confessed）。');
+      }
+    } else if (tier === 'notice') {
+      out.push('你最近有點在意對方，但還說服自己這只是炮友。');
+    }
+    if (canBecomeLovers(s)) out.push('如果對方向你告白、而你也有感覺，可以接受（confession_accepted）；不想要就婉拒（confession_rejected）。');
+    out.push('如果你們決定結束這段關係，回報 relationship_event: ended_fwb。');
     return out;
   }
   if (s.stage === 'ex') {
@@ -379,6 +415,8 @@ export interface MemoryDto {
 
 export interface AvatarStateDto {
   mood: Mood;
+  /** 開啟成人內容時：現在親密的尺度最多到哪裡（程式依關係、數值、開放程度與心情算出）；關閉時為 null */
+  intimacy: IntimacyLevel | null;
   relationship: RelationshipState & { events: RelationshipEventRecord[] };
   impression: string | null;
   memories: MemoryDto[];
@@ -389,3 +427,14 @@ export interface AvatarStateDto {
 }
 
 export const resetRelationshipSchema = z.object({ stage: z.enum(INITIAL_STAGES) });
+
+/** 手動調整和玩家的關係：直接設定階段與數值（省略的不變） */
+export const relationshipPatchSchema = z
+  .object({
+    stage: z.enum(STAGES).optional(),
+    affinity: z.number().int().min(-100).max(100).optional(),
+    trust: z.number().int().min(0).max(100).optional(),
+    romance: z.number().int().min(0).max(100).optional(),
+  })
+  .refine((p) => Object.values(p).some((v) => v !== undefined), '沒有要調整的項目');
+export type RelationshipPatch = z.infer<typeof relationshipPatchSchema>;

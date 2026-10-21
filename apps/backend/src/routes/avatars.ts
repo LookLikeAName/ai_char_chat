@@ -19,7 +19,7 @@ import { avatarToDto, mediaUrl, validatePersona } from '../services/avatars.ts';
 import { assertLinkTargets, loadLinks, saveLinks } from '../services/avatarLinks.ts';
 import { takePhoto } from '../services/photos.ts';
 import { assertProfileExists, getProfile, resolveRow } from '../services/llmProfiles.ts';
-import { getRelationship } from '../relationship/service.ts';
+import { assertStageAllowed, getRelationship } from '../relationship/service.ts';
 import { loadSettings } from '../services/settings.ts';
 
 const idParams = z.object({ id: z.uuid() });
@@ -77,6 +77,8 @@ export async function avatarRoutes(app: FastifyInstance) {
     if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona) ?? {};
     if (input.links) await assertLinkTargets(db, input.links);
+    const adult = (await loadSettings(db)).adultContent;
+    for (const st of [input.initialStage, ...(input.links ?? []).map((l) => l.stage)]) if (st) assertStageAllowed(st, adult);
     // 建立 avatar 時一起建立它的一對一聊天
     const row = await db.transaction(async (tx) => {
       const [a] = await tx
@@ -108,7 +110,15 @@ export async function avatarRoutes(app: FastifyInstance) {
     await load(id);
     if (input.llm) await assertProfileExists(db, input.llm.profileId, 'chat');
     const persona = validatePersona(input.persona);
-    if (input.links) await assertLinkTargets(db, input.links);
+    if (input.links) {
+      await assertLinkTargets(db, input.links);
+      const adult = (await loadSettings(db)).adultContent;
+      // 已經存在的炮友關聯保留（關閉成人內容後再儲存不會被擋），新設的才檢查
+      const existing = (await loadLinks(db, [id])).get(id) ?? [];
+      for (const l of input.links) {
+        if (!existing.some((e) => e.avatarId === l.avatarId && e.stage === l.stage)) assertStageAllowed(l.stage, adult);
+      }
+    }
     const [row] = await db
       .update(avatars)
       .set({

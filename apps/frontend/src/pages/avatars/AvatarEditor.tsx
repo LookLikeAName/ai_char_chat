@@ -14,7 +14,7 @@ import {
   type ImageStyle,
   type InitialStage,
   type LlmBinding,
-  INITIAL_STAGES,
+  INTIMACY_LABELS,
   shownName,
   STAGE_LABELS,
 } from '@acc/shared';
@@ -23,10 +23,12 @@ import { Icon } from '../../components/Icon.tsx';
 import { LlmBindingEditor } from '../../components/LlmBindingEditor.tsx';
 import { PhotoSettingsCard } from '../../components/PhotoSettingsCard.tsx';
 import { RelatedAvatarsCard } from '../../components/RelatedAvatarsCard.tsx';
+import { RelationshipAdjust } from '../../components/RelationshipAdjust.tsx';
 import { ExportDialog } from '../../components/TransferDialogs.tsx';
 import { PersonaEditor, type PersonaState } from '../../components/persona/PersonaEditor.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { deepEqual } from '../../lib/equal.ts';
+import { useStageOptions } from '../../lib/stages.ts';
 import { errorText, useToast } from '../../lib/toast.tsx';
 
 type Tab = 'basic' | 'persona' | 'brain';
@@ -266,33 +268,12 @@ function UserRelationCard({
   initialStage: InitialStage;
   onInitialStage: (s: InitialStage) => void;
 }) {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const [resetTo, setResetTo] = useState<InitialStage | ''>('');
+  const { initial } = useStageOptions(initialStage);
   const { data: state } = useQuery({
     queryKey: qk.avatarState(avatar?.id ?? ''),
     queryFn: () => api.avatarState(avatar!.id),
     enabled: !!avatar,
   });
-  const reset = useMutation({
-    mutationFn: (stage: InitialStage) => api.resetRelationship(avatar!.id, stage),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: qk.avatarState(avatar!.id) });
-      setResetTo('');
-      toast('關係已重設', 'success');
-    },
-    onError: (err) => toast(errorText(err), 'error'),
-  });
-
-  const stages = (
-    <>
-      {INITIAL_STAGES.map((s) => (
-        <option key={s} value={s}>
-          {STAGE_LABELS[s]}
-        </option>
-      ))}
-    </>
-  );
 
   if (!avatar) {
     return (
@@ -301,10 +282,14 @@ function UserRelationCard({
         <label className="field">
           <span className="field-label">一開始的關係</span>
           <select value={initialStage} onChange={(e) => onInitialStage(e.target.value as InitialStage)}>
-            {stages}
+            {initial.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_LABELS[s]}
+              </option>
+            ))}
           </select>
           <span className="hint">
-            決定一開始的好感、信任與心動。也可以一開始就是曖昧、戀人或前任。AI 補完會照這個程度寫下面人格設定裡的「和你的關係」，例如選「朋友」就不會寫成剛認識。建立後也可以在這裡或聊天的資訊面板重設。
+            決定一開始的好感、信任與心動。也可以一開始就是曖昧、戀人或前任。AI 補完會照這個程度寫下面人格設定裡的「和你的關係」，例如選「朋友」就不會寫成剛認識。建立後也可以在這裡或聊天的資訊面板調整。
           </span>
         </label>
       </section>
@@ -315,35 +300,28 @@ function UserRelationCard({
     <section className="card">
       <h2>和你的熟悉程度</h2>
       {state ? (
-        <p>
-          目前：<span className={`stage stage-${state.relationship.stage}`}>{STAGE_LABELS[state.relationship.stage]}</span>
-          <span className="hint">
-            {' '}
-            好感 {state.relationship.affinity}、信任 {state.relationship.trust}
-            {state.relationship.romance ? `、心動 ${state.relationship.romance}` : ''}
-          </span>
-        </p>
+        <>
+          <p>
+            目前：<span className={`stage stage-${state.relationship.stage}`}>{STAGE_LABELS[state.relationship.stage]}</span>
+            <span className="hint">
+              {' '}
+              好感 {state.relationship.affinity}、信任 {state.relationship.trust}
+              {state.relationship.romance ? `、心動 ${state.relationship.romance}` : ''}
+              {state.intimacy ? `・親密的尺度最多到「${INTIMACY_LABELS[state.intimacy]}」` : ''}
+            </span>
+          </p>
+          <details className="rel-reset">
+            <summary className="hint">手動調整</summary>
+            <RelationshipAdjust
+              key={`${state.relationship.stage}:${state.relationship.affinity}:${state.relationship.trust}:${state.relationship.romance}`}
+              avatarId={avatar.id}
+              current={state.relationship}
+            />
+          </details>
+        </>
       ) : (
         <p className="hint">載入中…</p>
       )}
-      <div className="related-add">
-        <select value={resetTo} onChange={(e) => setResetTo(e.target.value as InitialStage)} aria-label="重設成">
-          <option value="">重設成…</option>
-          {stages}
-        </select>
-        <button
-          type="button"
-          className="btn"
-          disabled={!resetTo || reset.isPending}
-          onClick={() => {
-            if (resetTo && confirm(`要把和你的關係重設成「${STAGE_LABELS[resetTo]}」嗎？好感與信任會回到起始值，記憶不會刪除。`)) {
-              reset.mutate(resetTo);
-            }
-          }}
-        >
-          重設
-        </button>
-      </div>
       <span className="hint">關係會隨聊天自己變化；AI 補完與一致性檢查會照目前的程度寫人格設定裡的「和你的關係」。</span>
     </section>
   );

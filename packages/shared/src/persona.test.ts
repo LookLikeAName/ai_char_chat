@@ -1,20 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   currentBlock,
+  isOptionalField,
   isPersonaEmpty,
   missingFields,
   PERSONA_PATHS,
   PERSONA_SECTIONS,
   personaSchema,
+  REQUIRED_PATHS,
   sanitizeDraft,
   setField,
+  unfilledFields,
 } from './persona.ts';
 
 describe('persona 定義', () => {
   it('介面的欄位說明和 schema 完全一致', () => {
     for (const section of PERSONA_SECTIONS) {
-      const shape = personaSchema.shape[section.key].shape;
-      expect(Object.keys(section.fields).sort()).toEqual(Object.keys(shape).sort());
+      const field = personaSchema.shape[section.key];
+      // 選填的區塊包了 optional + partial
+      const obj = (field instanceof z.ZodOptional ? field.unwrap() : field) as z.ZodObject;
+      expect(Object.keys(section.fields).sort()).toEqual(Object.keys(obj.shape).sort());
+      expect(field instanceof z.ZodOptional).toBe(!!section.optional);
     }
     expect(PERSONA_SECTIONS.map((s) => s.key).sort()).toEqual(Object.keys(personaSchema.shape).sort());
   });
@@ -22,6 +29,16 @@ describe('persona 定義', () => {
   it('未滿 18 歲不合法', () => {
     const { errors } = sanitizeDraft({ basic: { age: 17 } });
     expect(errors['basic.age']).toContain('18');
+  });
+});
+
+describe('選填的區塊（親密與性）', () => {
+  it('不算在必填的欄位裡；有填的也要合法', () => {
+    expect(missingFields({}).some((p) => p.startsWith('intimacy.'))).toBe(false);
+    expect(unfilledFields({}).filter((p) => p.startsWith('intimacy.'))).toEqual(['intimacy.openness', 'intimacy.style', 'intimacy.limits']);
+    expect(sanitizeDraft({ intimacy: { openness: 80, limits: [] } })).toEqual({ draft: { intimacy: { openness: 80 } }, errors: { 'intimacy.limits': expect.any(String) } });
+    expect(isOptionalField('intimacy.style')).toBe(true);
+    expect(isOptionalField('basic.age')).toBe(false);
   });
 });
 
@@ -44,7 +61,8 @@ describe('sanitizeDraft', () => {
 
 describe('完整度', () => {
   it('空的設定缺所有欄位', () => {
-    expect(missingFields({})).toEqual(PERSONA_PATHS);
+    expect(missingFields({})).toEqual(REQUIRED_PATHS);
+    expect(REQUIRED_PATHS).toHaveLength(59);
     expect(isPersonaEmpty({})).toBe(true);
     expect(isPersonaEmpty(setField({}, 'basic.age', 30))).toBe(false);
   });

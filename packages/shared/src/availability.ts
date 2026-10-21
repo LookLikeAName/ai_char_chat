@@ -176,6 +176,7 @@ const STAGE_FACTOR: Record<Stage, number> = {
   crush: 1.6,
   lover: 2,
   ex: 0.3,
+  fwb: 1.5,
   cold: 0.15,
   estranged: 0,
 };

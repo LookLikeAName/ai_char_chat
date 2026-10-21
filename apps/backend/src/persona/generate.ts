@@ -3,11 +3,13 @@ import {
   fieldSchema,
 
   isFieldFilled,
+  isOptionalField,
   missingFields,
   PERSONA_PATHS,
   sanitizeDraft,
   setField,
   STAGE_LABELS,
+  unfilledFields,
   type AppSettings,
   type PersonaDraft,
   type PersonaGenerateResult,
@@ -31,6 +33,10 @@ const RULES = `# 要求
 - 說話範例要真的像他會傳的訊息，符合語氣、用字、標點與 emoji 習慣。
 - 作息用 24 小時制，平日與假日都要涵蓋一整天。`;
 
+const ADULT_RULES = `# 親密與性（這個遊戲開啟了成人內容）
+- intimacy 區塊照角色概念如實寫，不要刻意淡化、說教或避開；例如角色概念是炮友，開放程度就要高，喜歡的方式寫具體。
+- 底線寫成具體的「不做的事」。角色一律是成年人。`;
+
 const REFERENCE_RULES = `# 和相關的角色
 - 共同的事實要對得上：公司或學校的名字、地點、怎麼認識的、認識多久、誰是誰的上司或學長姐。
 - 個性、說話方式、興趣要和他們有明顯的差別，不要複製；可以有互補或摩擦。
@@ -49,7 +55,10 @@ function readValue(out: Record<string, unknown>, path: PersonaPath): unknown {
 export async function generatePersona(ctx: CallContext, settings: AppSettings, input: Input): Promise<PersonaGenerateResult> {
   const { draft: base } = sanitizeDraft(input.persona);
   const locks = new Set(input.locks);
-  const targets = (input.only ? input.only.filter((p) => PERSONA_PATHS.includes(p)) : missingFields(base)).filter(
+  // 「親密與性」只有開啟成人內容時才產生
+  const adult = settings.adultContent;
+  const allowed = (p: PersonaPath) => PERSONA_PATHS.includes(p) && (adult || !isOptionalField(p));
+  const targets = (input.only ? input.only.filter(allowed) : adult ? unfilledFields(base) : missingFields(base)).filter(
     // 鎖定的欄位不重新產生；但還沒填的鎖定欄位一樣要補（全部填滿才能儲存）
     (p) => !locks.has(p) || !isFieldFilled(base, p),
   );
@@ -63,7 +72,7 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
   let pending = targets;
   let errors: Record<PersonaPath, string> = {};
   let lastOutput = '';
-  const references = await referenceSection(ctx.db, input.references ?? []);
+  const references = await referenceSection(ctx.db, input.references ?? [], adult);
 
   // 第一次產生全部；有不合法的值再針對那幾個欄位重試一次
   for (let attempt = 0; attempt < 2 && (pending.length || (attempt === 0 && (wantName || wantBio))); attempt++) {
@@ -94,6 +103,7 @@ export async function generatePersona(ctx: CallContext, settings: AppSettings, i
         : '',
       '',
       RULES,
+      pending.some((p) => p.startsWith('intimacy.')) ? `\n${ADULT_RULES}` : '',
       references ? `\n${REFERENCE_RULES}` : '',
       '',
       `# 輸出格式

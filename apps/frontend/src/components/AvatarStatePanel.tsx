@@ -2,17 +2,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import {
-  EVENT_LABELS,
-  INITIAL_STAGES,
-  STAGE_LABELS,
-  utilityBinding,
-  type InitialStage,
-  type Mood,
-} from '@acc/shared';
+import { EVENT_LABELS, INTIMACY_LABELS, STAGE_LABELS, utilityBinding, type Mood } from '@acc/shared';
 import { api, qk } from '../lib/api.ts';
 import { shortTime } from '../lib/format.ts';
 import { errorText, useToast } from '../lib/toast.tsx';
+import { RelationshipAdjust } from './RelationshipAdjust.tsx';
 
 function moodEmoji(m: Mood): string {
   if (m.valence >= 3) return '😄';
@@ -52,7 +46,6 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: api.settings });
   const canRemember = !!settings && !!utilityBinding(settings, 'memory');
   const [showAll, setShowAll] = useState(false);
-  const [resetTo, setResetTo] = useState<InitialStage | ''>('');
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.avatarState(avatarId) });
 
   const forget = useMutation({
@@ -65,15 +58,6 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
     onSuccess: (r) => {
       refresh();
       toast(r.updated ? '印象已更新' : '還沒有新的記憶可以整理', r.updated ? 'success' : 'info');
-    },
-    onError: (err) => toast(errorText(err), 'error'),
-  });
-  const reset = useMutation({
-    mutationFn: (stage: InitialStage) => api.resetRelationship(avatarId, stage),
-    onSuccess: () => {
-      refresh();
-      setResetTo('');
-      toast('關係已重設', 'success');
     },
     onError: (err) => toast(errorText(err), 'error'),
   });
@@ -113,29 +97,18 @@ export function AvatarStatePanel({ avatarId }: { avatarId: string }) {
             ))}
           </ul>
         )}
+        {state.intimacy && (
+          <p className="hint">
+            親密的尺度現在最多到：<strong>{INTIMACY_LABELS[state.intimacy]}</strong>（依關係、好感與信任、它的開放程度與心情）
+          </p>
+        )}
         <details className="rel-reset">
-          <summary className="hint">重設關係</summary>
-          <div className="row">
-            <select value={resetTo} onChange={(e) => setResetTo(e.target.value as InitialStage)} aria-label="重設成">
-              <option value="">選擇階段…</option>
-              {INITIAL_STAGES.map((s) => (
-                <option key={s} value={s}>
-                  {STAGE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-            <button
-              className="btn btn-small"
-              disabled={!resetTo || reset.isPending}
-              onClick={() => {
-                if (resetTo && confirm(`要把關係重設成「${STAGE_LABELS[resetTo]}」嗎？好感與信任會回到起始值，記憶不會刪除。`)) {
-                  reset.mutate(resetTo);
-                }
-              }}
-            >
-              重設
-            </button>
-          </div>
+          <summary className="hint">調整關係</summary>
+          <RelationshipAdjust
+            key={`${state.relationship.stage}:${state.relationship.affinity}:${state.relationship.trust}:${state.relationship.romance}`}
+            avatarId={avatarId}
+            current={state.relationship}
+          />
         </details>
       </dd>
 

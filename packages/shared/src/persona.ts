@@ -98,6 +98,13 @@ const rankingSchema = z
   .length(SCHWARTZ_VALUES.length)
   .refine((a) => new Set(a).size === a.length, '每個價值只能出現一次');
 
+/** 親密與性（選填）：開啟成人內容時才會用到；舊的 avatar 沒有這一區 */
+const intimacyFields = {
+  openness: scale,
+  style: long,
+  limits: list,
+};
+
 export const personaSchema = z.object({
   basic: z.object({
     age: z.number().int().min(18, 'avatar 必須是成年人（18 歲以上）').max(120),
@@ -178,12 +185,18 @@ export const personaSchema = z.object({
     withUser: long,
     callsUser: text,
   }),
+  intimacy: z.object(intimacyFields).partial().optional(),
 });
 export type Persona = z.infer<typeof personaSchema>;
 export type PersonaSection = keyof Persona;
 
 /** 編輯中的設定：任何欄位都可能還沒填 */
-export type PersonaDraft = { [S in PersonaSection]?: { [F in keyof Persona[S]]?: Persona[S][F] } };
+export type PersonaDraft = {
+  [S in PersonaSection]?: { [F in keyof NonNullable<Persona[S]>]?: NonNullable<Persona[S]>[F] };
+};
+
+/** 選填的區塊：不算在「全部填滿才能儲存」裡 */
+const OPTIONAL_SECTIONS: Partial<Record<PersonaSection, Record<string, z.ZodType>>> = { intimacy: intimacyFields };
 
 // ---------- 介面用的欄位說明 ----------
 
@@ -213,6 +226,10 @@ export interface SectionMeta {
   key: PersonaSection;
   label: string;
   fields: Record<string, FieldMeta>;
+  /** 選填的區塊（不填也可以儲存） */
+  optional?: boolean;
+  /** 區塊說明 */
+  hint?: string;
 }
 
 export const PERSONA_SECTIONS: SectionMeta[] = [
@@ -340,6 +357,17 @@ export const PERSONA_SECTIONS: SectionMeta[] = [
       callsUser: { label: '怎麼稱呼你', type: 'text' },
     },
   },
+  {
+    key: 'intimacy',
+    label: '親密與性',
+    optional: true,
+    hint: '選填。開啟成人內容時，決定它對親密、性話題的尺度；沒填時當作普通（50）。',
+    fields: {
+      openness: { label: '對性的開放程度', type: 'scale', scaleLabels: ['很保守', '非常開放'] },
+      style: { label: '喜歡的親密方式', type: 'long', hint: '例如：喜歡慢慢來、愛撒嬌、主導或被主導、喜歡用文字調情' },
+      limits: { label: '親密的底線', type: 'list', hint: '絕對不做的事，任何關係都一樣' },
+    },
+  },
 ];
 
 // ---------- 工具 ----------
@@ -351,6 +379,15 @@ export const PERSONA_PATHS: PersonaPath[] = PERSONA_SECTIONS.flatMap((s) =>
   Object.keys(s.fields).map((f) => `${s.key}.${f}`),
 );
 
+/** 必填的欄位（全部填滿才能儲存） */
+export const REQUIRED_PATHS: PersonaPath[] = PERSONA_SECTIONS.filter((s) => !s.optional).flatMap((s) =>
+  Object.keys(s.fields).map((f) => `${s.key}.${f}`),
+);
+
+export function isOptionalField(path: PersonaPath): boolean {
+  return !!PERSONA_SECTIONS.find((s) => s.key === path.split('.')[0])?.optional;
+}
+
 export function fieldMeta(path: PersonaPath): FieldMeta | undefined {
   const [s, f] = path.split('.');
   return PERSONA_SECTIONS.find((x) => x.key === s)?.fields[f!];
@@ -358,7 +395,9 @@ export function fieldMeta(path: PersonaPath): FieldMeta | undefined {
 
 export function fieldSchema(path: PersonaPath): z.ZodType | undefined {
   const [s, f] = path.split('.') as [PersonaSection, string];
-  const section = personaSchema.shape[s] as z.ZodObject | undefined;
+  const optional = OPTIONAL_SECTIONS[s];
+  if (optional) return optional[f];
+  const section = personaSchema.shape[s] as unknown as z.ZodObject | undefined;
   return section?.shape[f] as z.ZodType | undefined;
 }
 
@@ -383,7 +422,13 @@ export function isFieldFilled(draft: PersonaDraft, path: PersonaPath): boolean {
   return fieldSchema(path)?.safeParse(v).success ?? false;
 }
 
+/** 還沒填的必填欄位 */
 export function missingFields(draft: PersonaDraft): PersonaPath[] {
+  return REQUIRED_PATHS.filter((p) => !isFieldFilled(draft, p));
+}
+
+/** 還沒填的欄位（含選填的） */
+export function unfilledFields(draft: PersonaDraft): PersonaPath[] {
   return PERSONA_PATHS.filter((p) => !isFieldFilled(draft, p));
 }
 

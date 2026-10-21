@@ -14,3 +14,4 @@ export * from './transfer.ts';
 export * from './auth.ts';
 export * from './images.ts';
 export * from './backup.ts';
+export * from './intimacy.ts';
