@@ -1,13 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { groupInputSchema, sendMessageSchema, type ConversationDto } from '@acc/shared';
-import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
+import { groupInputSchema, meetupStartSchema, sendMessageSchema, type ConversationDto, type MeetupDto } from '@acc/shared';
+import { avatars, conversationMembers, conversations, meetups, messages } from '../db/schema.ts';
 import { HttpError, notFound, parseBody } from '../errors.ts';
 import { scheduleGroupTurn, scheduleReply } from '../reply/planner.ts';
 import { getRelationship } from '../relationship/service.ts';
 import { mediaUrl } from '../services/avatars.ts';
+import { activeMeetup, endMeetup, meetupToDto } from '../services/meetups.ts';
 import { messageToDto, postMessage } from '../services/messages.ts';
+import { logEvent } from '../observability.ts';
 import { readUpload } from './uploads.ts';
 
 const idParams = z.object({ id: z.uuid() });
@@ -55,6 +57,12 @@ export async function conversationRoutes(app: FastifyInstance) {
       )
       .groupBy(messages.conversationId);
     const unreadBy = new Map(unread.map((u) => [u.conversationId, Number(u.n)]));
+    const meetingBy = new Map<string, MeetupDto>();
+    for (const c of convs) {
+      if (c.type !== 'dm') continue;
+      const m = await activeMeetup(db, c.id);
+      if (m) meetingBy.set(c.id, meetupToDto(m));
+    }
 
     return convs
       .map((c): ConversationDto => {
@@ -72,6 +80,7 @@ export async function conversationRoutes(app: FastifyInstance) {
           unreadCount: unreadBy.get(c.id) ?? 0,
           seenUpTo: dmAvatar?.seenUpTo?.toISOString() ?? null,
           members: mem.map((m) => ({ avatarId: m.avatarId, seenUpTo: m.seenUpTo?.toISOString() ?? null })),
+          meetup: meetingBy.get(c.id) ?? null,
         };
       })
       .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
@@ -92,14 +101,19 @@ export async function conversationRoutes(app: FastifyInstance) {
 
   app.post('/conversations/:id/messages', async (req, reply) => {
     const { id } = parseBody(idParams, req.params);
-    const { content, image } = parseBody(sendMessageSchema, req.body);
+    const { content, image, action } = parseBody(sendMessageSchema, req.body);
     const conv = await assertConversation(id);
     const upload = image ? await readUpload(app.deps.mediaDir, image) : null;
+    const meetup = conv.type === 'dm' ? await activeMeetup(db, id) : null;
     const dto = await postMessage(db, events, {
       conversationId: id,
       senderType: 'user',
-      content,
-      meta: upload ? { image: { path: upload.path, mime: upload.mime, width: upload.width, height: upload.height } } : undefined,
+      // 沒在見面（例如剛好被 avatar 結束了）：動作就寫在訊息裡
+      content: !meetup && action ? `（${action}）${content}` : content,
+      meta: {
+        ...(upload ? { image: { path: upload.path, mime: upload.mime, width: upload.width, height: upload.height } } : {}),
+        ...(meetup ? { meetupId: meetup.id, ...(action ? { narration: action } : {}) } : {}),
+      },
     });
     // 一對一：依 avatar 的作息決定什麼時候看到；群組：等玩家講完再開始一輪
     if (conv.type === 'group') await scheduleGroupTurn(db, jobs, id);
@@ -128,7 +142,47 @@ export async function conversationRoutes(app: FastifyInstance) {
     await jobs.add(
       conv.type === 'group' ? { kind: 'group.turn', conversationId: id, force: true } : { kind: 'reply', conversationId: id, force: true },
     );
+    // 見面剛開始、avatar 還沒開口就失敗了：再讓它開口一次（已經說過話的話不會重複）
+    if (conv.type === 'dm' && (await activeMeetup(db, id))) await jobs.add({ kind: 'meetup.open', conversationId: id });
     return reply.status(202).send();
+  });
+
+  /** 開始見面：玩家寫了開場就當成第一個動作，沒寫就由 avatar 先開口 */
+  app.post('/conversations/:id/meetup', async (req, reply) => {
+    const { id } = parseBody(idParams, req.params);
+    const { place, note, opening } = parseBody(meetupStartSchema, req.body);
+    const conv = await assertConversation(id);
+    if (conv.type !== 'dm') throw new HttpError(400, '只有一對一的聊天可以見面');
+    if (await activeMeetup(db, id)) throw new HttpError(409, '你們已經在見面了');
+    const [member] = await db.select().from(conversationMembers).where(eq(conversationMembers.conversationId, id));
+    if (!member) throw notFound('avatar');
+    const [m] = await db.insert(meetups).values({ conversationId: id, avatarId: member.avatarId, place, note }).returning();
+    await postMessage(db, events, {
+      conversationId: id,
+      senderType: 'system',
+      content: `你們約在${place}見面${note ? `（${note}）` : ''}`,
+      meta: { systemKind: 'notice', meetupId: m!.id },
+    });
+    await logEvent({ category: 'reply', type: 'meetup.started', avatarId: member.avatarId, conversationId: id, message: `開始見面：${place}${note ? `（${note}）` : ''}` });
+    if (opening) {
+      await postMessage(db, events, { conversationId: id, senderType: 'user', content: '', meta: { meetupId: m!.id, narration: opening } });
+      await scheduleReply(db, jobs, id);
+    } else {
+      await jobs.add({ kind: 'meetup.open', conversationId: id });
+    }
+    await events.publish({ type: 'conversations.changed' });
+    return reply.status(201).send(meetupToDto(m!));
+  });
+
+  /** 結束見面，馬上整理這次見面的記憶 */
+  app.post('/conversations/:id/meetup/end', async (req) => {
+    const { id } = parseBody(idParams, req.params);
+    await assertConversation(id);
+    const m = await activeMeetup(db, id);
+    if (!m) throw new HttpError(409, '現在沒有在見面');
+    const ended = await endMeetup(db, events, m, 'user');
+    await jobs.add({ kind: 'memory.extract', avatarId: m.avatarId, conversationId: id, force: true });
+    return meetupToDto(ended ?? m);
   });
 
   async function assertConversation(id: string) {

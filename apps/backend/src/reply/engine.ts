@@ -26,7 +26,7 @@ import {
 } from '@acc/shared';
 import type { SecretBox } from '../crypto.ts';
 import type { Db } from '../db/client.ts';
-import { avatars, avatarState, conversationMembers, conversations, messages, relationships } from '../db/schema.ts';
+import { avatars, avatarState, conversationMembers, conversations, meetups, messages, relationships } from '../db/schema.ts';
 import type { EventPublisher } from '../events/bus.ts';
 import { loggedContent } from '../llm/content.ts';
 import type { FetchFn } from '../llm/index.ts';
@@ -45,11 +45,12 @@ import { linkedAvatars, loadLinks } from '../services/avatarLinks.ts';
 import { avatarPhoto } from '../services/avatars.ts';
 import { photosRemaining, takePhoto } from '../services/photos.ts';
 import { loadSettings } from '../services/settings.ts';
-import { parseReplyOutput, plainTextFallback, type ReplyOutput } from './output.ts';
+import { activeMeetup, endMeetup, meetupsOf, type MeetupRow } from '../services/meetups.ts';
+import { parseReplyOutput, plainTextFallback, type Beat, type ReplyOutput } from './output.ts';
 import { buildReplyPrompt, formatGap, type HistoryMessage, type PromptGroup, type PromptSituation } from './prompt.ts';
 import { prepareImages, profileVision, type LoadedHistory } from './images.ts';
 import { ACTIVE_WINDOW_MS } from './planner.ts';
-import { betweenMessagesMs, readPauseMs, typingMs, type Random } from './timing.ts';
+import { beatPauseMs, betweenMessagesMs, readPauseMs, typingMs, type Random } from './timing.ts';
 
 export interface ReplyEngineDeps {
   db: Db;
@@ -58,6 +59,8 @@ export interface ReplyEngineDeps {
   lock: Lock;
   /** 回覆完成後呼叫（排程記憶萃取） */
   onReplied?: (avatarId: string, conversationId: string) => Promise<void>;
+  /** avatar 自己結束了見面（馬上整理這次見面的記憶） */
+  onMeetupEnded?: (avatarId: string, conversationId: string) => Promise<void>;
   /** 群組：玩家還在打字時，延後這一輪 */
   enqueue?: (job: AgentJob, delayMs: number) => Promise<void>;
   fetchFn?: FetchFn;
@@ -80,6 +83,8 @@ interface Ctx {
   seenUpTo: Date | null;
   replyDueAt: Date | null;
   replyReason: PromptSituation['reason'] | null;
+  /** 一對一：正在進行的見面 */
+  meetup: MeetupRow | null;
 }
 
 const LOCK_TTL_MS = 3 * 60 * 1000;
@@ -127,7 +132,7 @@ export class ReplyEngine {
         const snapshot = await this.latestUserMessageAt(conversationId);
         if (!snapshot || (ctx.handledUpTo && snapshot <= ctx.handledUpTo)) return 'done';
         const now = this.now();
-        if (round === 0 && !opts.force && ctx.replyDueAt && now.getTime() < ctx.replyDueAt.getTime() - 1000) {
+        if (round === 0 && !opts.force && !ctx.meetup && ctx.replyDueAt && now.getTime() < ctx.replyDueAt.getTime() - 1000) {
           await logEvent({
             category: 'reply',
             type: 'reply.early',
@@ -151,8 +156,10 @@ export class ReplyEngine {
         if (await this.overQuota(conversationId, ctx.avatar, true)) return 'done';
 
         // 第一輪才有「怎麼看到訊息」的情境；之後是正在聊天中
-        const situation: PromptSituation =
-          round === 0
+        // 見面中：面對面，馬上反應
+        const situation: PromptSituation = ctx.meetup
+          ? meetupSituation(ctx.meetup)
+          : round === 0
             ? { mode: 'reply', reason: ctx.replyReason ?? 'normal', waitedMs: await this.waitedMs(ctx, now) }
             : { mode: 'reply', reason: 'normal' };
         await this.markSeen(ctx, snapshot);
@@ -215,6 +222,8 @@ export class ReplyEngine {
     try {
       const ctx = await this.loadContext(conversationId);
       if (!ctx?.avatar.llm) return 'skipped';
+      // 正在見面：當面聊，不會傳訊息
+      if (ctx.meetup) return 'skipped';
       const latestUser = await this.latestUserMessageAt(conversationId);
       if (latestUser && (!ctx.handledUpTo || latestUser > ctx.handledUpTo)) return 'skipped';
       if (await this.overQuota(conversationId, ctx.avatar, false)) return 'skipped';
@@ -543,6 +552,8 @@ export class ReplyEngine {
         const [conv] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
         const ctx = await this.loadContext(conversationId, avatarId);
         if (!conv || conv.type !== 'group' || !ctx?.avatar.llm) return 'skipped';
+        // 正在和玩家見面：不會在群組裡開話題
+        if (await this.inMeetup(avatarId)) return 'skipped';
         const latestUser = await this.latestUserMessageAt(conversationId);
         if (latestUser && (!conv.handledUpTo || latestUser > conv.handledUpTo)) return 'skipped';
         if (await this.overQuota(conversationId, ctx.avatar, false)) return 'skipped';
@@ -604,7 +615,7 @@ export class ReplyEngine {
     situation: PromptSituation,
   ): Promise<Outcome> {
     const avatarId = ctx.avatar.id;
-    await this.sleep(readPauseMs(this.random));
+    if (!ctx.meetup) await this.sleep(readPauseMs(this.random));
     if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) return { kind: 'restart' };
 
     await setTyping(avatarId, true);
@@ -612,6 +623,14 @@ export class ReplyEngine {
     if (await this.hasNewerUserMessage(ctx.conversationId, snapshot)) {
       await setTyping(avatarId, false);
       return { kind: 'restart' };
+    }
+    if (ctx.meetup) {
+      const sent = await this.sendBeats(ctx, output, () => this.hasNewerUserMessage(ctx.conversationId, snapshot));
+      await setTyping(avatarId, false);
+      if (!sent && beatsOf(output).length) return { kind: 'restart' };
+      if (sent < beatsOf(output).length) return { kind: 'interrupted', output };
+      await this.maybeLeave(ctx, output);
+      return { kind: 'sent', output };
     }
 
     for (const [i, text] of output.messages.entries()) {
@@ -637,6 +656,94 @@ export class ReplyEngine {
     if (output.photo) await this.sendPhoto(ctx, output);
     else if (!output.messages.length) await setTyping(avatarId, false);
     return { kind: 'sent', output };
+  }
+
+  /**
+   * 見面中：一段一段送出旁白與台詞，不用打字的時間；下一段等對方大概聽完上一段才說。
+   * 回傳送出幾段；interrupted 回傳 true 時停下來（玩家插話）。
+   */
+  private async sendBeats(ctx: Ctx, output: ReplyOutput, interrupted: () => Promise<boolean>): Promise<number> {
+    const beats = beatsOf(output);
+    let sent = 0;
+    for (const [i, beat] of beats.entries()) {
+      if (i > 0) {
+        await this.deps.events.publish({ type: 'typing', conversationId: ctx.conversationId, avatarId: ctx.avatar.id, typing: true });
+        await this.sleep(beatPauseMs(beats[i - 1]!, this.random));
+        if (await interrupted()) break;
+      }
+      await postMessage(this.deps.db, this.deps.events, {
+        conversationId: ctx.conversationId,
+        senderType: 'avatar',
+        senderAvatarId: ctx.avatar.id,
+        content: beat.say,
+        meta: {
+          meetupId: ctx.meetup!.id,
+          ...(beat.narration ? { narration: beat.narration } : {}),
+          ...(output.traceId ? { traceId: output.traceId } : {}),
+          ...(i === 0 && output.innerThought ? { innerThought: output.innerThought } : {}),
+        },
+      });
+      sent++;
+    }
+    return sent;
+  }
+
+  /** avatar 說要走：結束見面，整理這次見面的記憶 */
+  private async maybeLeave(ctx: Ctx, output: ReplyOutput): Promise<void> {
+    if (!output.leave || !ctx.meetup) return;
+    const ended = await endMeetup(this.deps.db, this.deps.events, ctx.meetup, 'avatar', { now: this.now(), avatarName: shownName(ctx.avatar) });
+    if (ended) await this.deps.onMeetupEnded?.(ctx.avatar.id, ctx.conversationId);
+  }
+
+  /** 剛開始見面、玩家沒有寫開場：由 avatar 先開口 */
+  async handleMeetupOpen(conversationId: string): Promise<'busy' | 'skipped' | 'sent'> {
+    return withScope({ conversationId }, async () => {
+      const key = `reply:${conversationId}`;
+      const token = await this.deps.lock.acquire(key, LOCK_TTL_MS);
+      if (!token) return 'busy';
+      const typing = (on: boolean) => this.deps.events.publish({ type: 'typing', conversationId, avatarId: ctx!.avatar.id, typing: on });
+      let ctx: Ctx | null = null;
+      try {
+        ctx = await this.loadContext(conversationId);
+        if (!ctx?.meetup || !ctx.avatar.llm) return 'skipped';
+        // 已經說過話（或玩家已經先開口，交給回覆流程）
+        const [spoken] = await this.deps.db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.conversationId, conversationId), inArray(messages.senderType, ['user', 'avatar']), sql`${messages.meta}->>'meetupId' = ${ctx.meetup.id}`))
+          .limit(1);
+        if (spoken) return 'skipped';
+        if (await this.overQuota(conversationId, ctx.avatar, true)) return 'skipped';
+        await typing(true);
+        const startedAt = this.now();
+        const output = await this.generate(ctx, { ...meetupSituation(ctx.meetup), meetup: { ...meetupSituation(ctx.meetup).meetup!, opening: true } });
+        const sent = await this.sendBeats(ctx, output, () => this.hasNewerUserMessage(conversationId, startedAt));
+        await logEvent({
+          category: 'reply',
+          type: 'meetup.opened',
+          avatarId: ctx.avatar.id,
+          traceId: output.traceId,
+          message: `${ctx.avatar.name} 在${ctx.meetup.place}和玩家碰面，先開口說了 ${sent} 段`,
+          data: { beats: beatsOf(output) },
+        });
+        if (!sent) return 'skipped';
+        await this.applyState(ctx, output);
+        await this.maybeLeave(ctx, output);
+        return 'sent';
+      } finally {
+        if (ctx) await typing(false).catch(() => {});
+        await this.deps.lock.release(key, token);
+      }
+    });
+  }
+
+  private async inMeetup(avatarId: string): Promise<boolean> {
+    const [row] = await this.deps.db
+      .select({ conversationId: meetups.conversationId })
+      .from(meetups)
+      .where(and(eq(meetups.avatarId, avatarId), sql`${meetups.endedAt} is null`))
+      .limit(1);
+    return !!row && !!(await activeMeetup(this.deps.db, row.conversationId, this.now()));
   }
 
   /**
@@ -844,6 +951,7 @@ export class ReplyEngine {
       settings,
       history,
       images,
+      meetups: (await meetupsOf(db, ctx.conversationId)).map((m) => ({ id: m.id, place: m.place, note: m.note, startedAt: m.startedAt })),
       photos: photosLeft === null ? null : { remaining: photosLeft, appears: avatarPhoto(ctx.avatar).appears, proxy: avatarPhoto(ctx.avatar).proxy },
       now,
     });
@@ -858,6 +966,7 @@ export class ReplyEngine {
           : null;
     const chat = nudge ? [...built, { role: 'user' as const, content: nudge }] : built;
     const allowEmpty = situation.mode === 'proactive' || !!group;
+    const meetupNotes = situation.meetup ? { place: situation.meetup.place, opening: !!situation.meetup.opening } : null;
     return {
       system,
       chat,
@@ -881,6 +990,7 @@ export class ReplyEngine {
         embedder: embedder?.model ?? null,
         lifeLog: lifeLog?.length ?? 0,
         historyMessages: history.length,
+        meetup: meetupNotes,
         images: { canSee, attached: images.size, photosLeft },
         disclosure: profile.preferences ? relationship.stage : 'no-profile',
         group: group ? { title: group.title, members: group.members.map((m) => m.name), mentioned: group.mentioned } : null,
@@ -955,8 +1065,9 @@ export class ReplyEngine {
     const ctx = await this.loadContext(conversationId, avatarId);
     if (!ctx) return null;
     const now = this.now();
-    const situation: PromptSituation =
-      mode === 'proactive'
+    const situation: PromptSituation = ctx.meetup
+      ? meetupSituation(ctx.meetup)
+      : mode === 'proactive'
         ? { mode: 'proactive' }
         : ctx.type === 'group'
           ? { mode: 'group' }
@@ -1018,17 +1129,17 @@ export class ReplyEngine {
           avatarId ? eq(conversationMembers.avatarId, avatarId) : eq(conversations.type, 'dm'),
         ),
       );
-    return row
-      ? {
-          conversationId,
-          type: row.type,
-          avatar: row.avatar,
-          handledUpTo: row.member.handledUpTo,
-          seenUpTo: row.member.seenUpTo,
-          replyDueAt: row.member.replyDueAt,
-          replyReason: row.member.replyReason,
-        }
-      : null;
+    if (!row) return null;
+    return {
+      conversationId,
+      type: row.type,
+      avatar: row.avatar,
+      handledUpTo: row.member.handledUpTo,
+      seenUpTo: row.member.seenUpTo,
+      replyDueAt: row.member.replyDueAt,
+      replyReason: row.member.replyReason,
+      meetup: row.type === 'dm' ? await activeMeetup(this.deps.db, conversationId, this.now()) : null,
+    };
   }
 
   private async latestUserMessageAt(conversationId: string): Promise<Date | null> {
@@ -1070,6 +1181,8 @@ export class ReplyEngine {
       ...(m as HistoryMessage & { id: string }),
       image: meta.image ? { caption: meta.image.caption ?? null, description: meta.image.description ?? null } : null,
       imageFile: meta.image,
+      meetupId: meta.meetupId ?? null,
+      narration: meta.narration ?? null,
     }));
   }
 
@@ -1139,4 +1252,13 @@ export class ReplyEngine {
       meta: { systemKind: kind },
     });
   }
+}
+
+function meetupSituation(m: MeetupRow): PromptSituation {
+  return { mode: 'meetup', meetup: { id: m.id, place: m.place, note: m.note, startedAt: m.startedAt } };
+}
+
+/** 見面時要送出的段落：模型只給了 messages 的話，當成沒有旁白的台詞 */
+function beatsOf(output: ReplyOutput): Beat[] {
+  return output.beats.length ? output.beats : output.messages.map((say) => ({ narration: '', say }));
 }

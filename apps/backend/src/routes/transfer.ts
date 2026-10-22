@@ -102,7 +102,9 @@ export async function transferRoutes(app: FastifyInstance) {
       const text = (m: (typeof rows)[number]) => {
         const img = m.meta.image;
         const tag = img ? `［${m.sender === 'avatar' ? '照片' : '圖片'}${img.description || img.caption ? `：${img.description ?? img.caption}` : ''}］` : '';
-        return [tag, m.content].filter(Boolean).join(' ').slice(0, 4000);
+        // 見面時說的：旁白和台詞寫成一行文字
+        const said = m.meta.meetupId ? `（見面時）${m.meta.narration ? `【${m.meta.narration}】` : ''}${m.content}` : m.content;
+        return [tag, said].filter(Boolean).join(' ').slice(0, 4000);
       };
       out.messages = rows
         .reverse()

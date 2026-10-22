@@ -1,4 +1,6 @@
 import type {
+  MeetupDto,
+  MeetupStartInput,
   AppSettings,
   RelationshipPatch,
   TraceRetryResultDto,
@@ -184,8 +186,11 @@ export const api = {
   conversations: () => request<ConversationDto[]>('GET', '/api/conversations'),
   messages: (conversationId: string) =>
     request<{ messages: MessageDto[]; hasMore: boolean }>('GET', `/api/conversations/${conversationId}/messages?limit=100`),
-  sendMessage: (conversationId: string, content: string, image?: string) =>
-    request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content, image }),
+  sendMessage: (conversationId: string, content: string, image?: string, action?: string) =>
+    request<MessageDto>('POST', `/api/conversations/${conversationId}/messages`, { content, image, action }),
+  startMeetup: (conversationId: string, input: MeetupStartInput) =>
+    request<MeetupDto>('POST', `/api/conversations/${conversationId}/meetup`, input),
+  endMeetup: (conversationId: string) => request<MeetupDto>('POST', `/api/conversations/${conversationId}/meetup/end`),
   upload: (blob: Blob) => {
     const form = new FormData();
     form.append('file', blob, blob instanceof File ? blob.name : 'image.jpg');

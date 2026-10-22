@@ -7,6 +7,7 @@ import type { Db } from '../db/client.ts';
 import { avatars, conversationMembers, conversations, messages } from '../db/schema.ts';
 import type { JobQueue } from '../jobs.ts';
 import { logEvent } from '../observability.ts';
+import { activeMeetup } from '../services/meetups.ts';
 import { loadSettings } from '../services/settings.ts';
 import type { Random } from './timing.ts';
 
@@ -31,6 +32,16 @@ export async function scheduleReply(
   if (!row || row.type !== 'dm') return null;
   const { member, avatar } = row;
   const settings = await loadSettings(db);
+
+  // 見面中：面對面，馬上反應（不看作息，也不用等）
+  if (await activeMeetup(db, conversationId, now)) {
+    await db
+      .update(conversationMembers)
+      .set({ replyDueAt: now, replyReason: 'normal' })
+      .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.avatarId, avatar.id)));
+    await jobs.add({ kind: 'reply', conversationId });
+    return { at: now, reason: 'normal' };
+  }
 
   const unseen = await db
     .select({ content: messages.content })

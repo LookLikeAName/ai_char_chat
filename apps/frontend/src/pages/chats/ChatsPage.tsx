@@ -15,6 +15,8 @@ import {
 import { AvatarImage } from '../../components/AvatarImage.tsx';
 import { AvatarStatePanel } from '../../components/AvatarStatePanel.tsx';
 import { GroupDialog } from '../../components/GroupDialog.tsx';
+import { MeetupDialog } from '../../components/MeetupDialog.tsx';
+import { MeetupView } from './MeetupView.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { api, qk } from '../../lib/api.ts';
 import { clockTime, dayLabel, sameDay, shortTime } from '../../lib/format.ts';
@@ -37,13 +39,23 @@ export function ChatsPage() {
       <ChatList conversations={conversations} avatars={avatars} loading={isLoading} selectedId={conversationId} />
       {current ? (
         <>
-          <ChatView
-            key={current.id}
-            conversation={current}
-            avatars={avatars}
-            mention={mention}
-            onToggleInfo={() => setInfoOpen((v) => !v)}
-          />
+          {current.meetup ? (
+            <MeetupView
+              key={current.meetup.id}
+              conversation={current}
+              meetup={current.meetup}
+              avatar={avatars.find((a) => a.id === current.memberAvatarIds[0])}
+              onToggleInfo={() => setInfoOpen((v) => !v)}
+            />
+          ) : (
+            <ChatView
+              key={current.id}
+              conversation={current}
+              avatars={avatars}
+              mention={mention}
+              onToggleInfo={() => setInfoOpen((v) => !v)}
+            />
+          )}
           {infoOpen && (
             <InfoPanel
               conversation={current}
@@ -246,7 +258,7 @@ function ChatItem({
         </span>
         <span className="chat-item-bottom">
           <span className={`chat-item-preview${typing ? ' typing-text' : ''}${unread ? ' unread-text' : ''}`}>
-            {typing ? typingText : preview}
+            {typing ? typingText : c.meetup ? `見面中・${c.meetup.place}` : preview}
           </span>
           {unread > 0 && (
             <span className="badge" aria-label={`${unread} 則未讀`}>
@@ -285,6 +297,7 @@ function ChatView({
   const [dropped, setDropped] = useState<{ file: File; n: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [viewer, setViewer] = useState<MessageImageDto | null>(null);
+  const [meeting, setMeeting] = useState(false);
   const dmAvatar = !isGroup ? byId.get(conversation.memberAvatarIds[0] ?? '') : undefined;
 
   useLayoutEffect(() => {
@@ -348,10 +361,16 @@ function ChatView({
                   : ''}
           </span>
         </div>
+        {!isGroup && (
+          <button className="icon-btn" onClick={() => setMeeting(true)} aria-label="約出來見面" title="約出來見面">
+            <Icon name="meet" />
+          </button>
+        )}
         <button className="icon-btn" onClick={onToggleInfo} aria-label="顯示或隱藏資訊面板" title="資訊面板">
           <Icon name="info" />
         </button>
       </header>
+      {meeting && <MeetupDialog conversationId={conversation.id} avatar={dmAvatar} onClose={() => setMeeting(false)} />}
 
       <div className="messages" ref={scrollRef}>
         {isLoading && <p className="hint pad">載入中…</p>}
@@ -480,7 +499,9 @@ function MessageList({
                   <div className="msg-line">
                     <div className={`msg-stack${m.image ? ' has-image' : ''}`}>
                       {m.image && <MessageImage image={m.image} onOpen={() => onOpenImage(m.image!)} />}
-                      {m.content && <div className="msg-bubble">{m.content}</div>}
+                      {/* 見面時的旁白：表情、動作 */}
+                      {m.narration && <div className="msg-narration">{m.narration}</div>}
+                      {m.content && <div className={`msg-bubble${m.meetupId ? ' msg-spoken' : ''}`}>{m.content}</div>}
                     </div>
                     <span className="msg-meta">
                       {seen && <span className="msg-seen">{seen}</span>}

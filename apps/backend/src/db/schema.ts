@@ -48,6 +48,10 @@ export interface MessageMeta {
   traceId?: string;
   /** 圖片訊息：檔案在 media 下的路徑 */
   image?: MessageImage;
+  /** 見面時說的：屬於哪一場見面 */
+  meetupId?: string;
+  /** 見面時的旁白（表情、動作、語氣；玩家的話是玩家自己的動作） */
+  narration?: string;
 }
 
 export interface MessageImage {
@@ -186,6 +190,30 @@ export const conversationMembers = pgTable(
     replyReason: text('reply_reason').$type<SeenReason>(),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.avatarId] }), index('conversation_members_avatar_idx').on(t.avatarId)],
+);
+
+/** 見面：一對一的對話裡，和 avatar 約出來面對面聊天的一段時間 */
+export const meetups = pgTable(
+  'meetups',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    avatarId: uuid('avatar_id')
+      .notNull()
+      .references(() => avatars.id, { onDelete: 'cascade' }),
+    place: text('place').notNull(),
+    note: text('note').notNull().default(''),
+    startedAt: timestamp('started_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true, precision: 3 }),
+    endedBy: text('ended_by').$type<'user' | 'avatar'>(),
+  },
+  // 一個對話同時只會有一場進行中的見面
+  (t) => [
+    index('meetups_conversation_idx').on(t.conversationId, t.startedAt),
+    uniqueIndex('meetups_active_idx').on(t.conversationId).where(sql`ended_at is null`),
+  ],
 );
 
 export const messages = pgTable(

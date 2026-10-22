@@ -60,6 +60,18 @@ export interface HistoryMessage {
   createdAt: Date;
   /** 圖片訊息：caption 是圖片內容的文字描述，description 是 avatar 傳的照片想拍的內容 */
   image?: { caption?: string | null; description?: string | null } | null;
+  /** 見面時說的：哪一場見面 */
+  meetupId?: string | null;
+  /** 見面時的旁白（avatar 的表情動作；玩家的話是玩家的動作） */
+  narration?: string | null;
+}
+
+/** 見面（第一場到現在這場）：對話紀錄裡標出什麼時候見面、在哪裡 */
+export interface PromptMeetup {
+  id: string;
+  place: string;
+  note?: string;
+  startedAt: Date;
 }
 
 /** 實際附上圖片的訊息（看得懂圖片的模型、最近幾張）；其他圖片用文字描述 */
@@ -118,7 +130,8 @@ export interface PromptState {
 
 /** 這次回覆（或主動傳訊息）的當下情境 */
 export interface PromptSituation {
-  mode: 'reply' | 'proactive' | 'group';
+  /** meetup：見面中，面對面說話 */
+  mode: 'reply' | 'proactive' | 'group' | 'meetup';
   /** 回覆時：怎麼看到訊息的 */
   reason?: SeenReason;
   /** 回覆時：玩家第一則還沒讀的訊息，到看到為止過了多久 */
@@ -127,6 +140,8 @@ export interface PromptSituation {
   mentioned?: boolean;
   /** 群組：這一輪在你之前已經回覆的成員 */
   before?: string[];
+  /** 見面中：哪一場；opening 表示剛碰面、由 avatar 先開口 */
+  meetup?: PromptMeetup & { opening?: boolean };
 }
 
 export interface ReplyPromptInput {
@@ -142,6 +157,8 @@ export interface ReplyPromptInput {
   /** 由舊到新 */
   history: HistoryMessage[];
   images?: HistoryImages;
+  /** 對話裡的見面（對話紀錄用來標出見面的開始與結束） */
+  meetups?: PromptMeetup[];
   /** 可以傳照片（有設定圖片模型）；remaining 是今天還能傳幾張，appears／proxy 是它在照片裡怎麼出現 */
   photos?: { remaining: number; appears?: PhotoAppears; proxy?: string } | null;
   now: Date;
@@ -234,7 +251,10 @@ export function buildSystemPrompt(raw: ReplyPromptInput): string {
 
   const handle = shown(avatar) !== avatar.name ? shown(avatar) : '';
   const self = `你是「${avatar.name}」${handle ? `（通訊軟體上的顯示名稱是「${handle}」）` : ''}`;
-  const opening = group
+  const meetup = situation?.mode === 'meetup' ? situation.meetup ?? null : null;
+  const opening = meetup
+    ? `${self}，和對方約出來見面，現在你們面對面在「${meetup.place}」。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`
+    : group
     ? `${self}，正在通訊軟體的群組「${group.title}」裡聊天。群組裡有你、對方（${group.userName}），還有${group.members.map((m) => `「${shown(m)}」`).join('、')}。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`
     : `${self}，正在用手機通訊軟體和對方聊天。你是一個真實的人，有自己的生活、想法和情緒，不是 AI 助理。`;
   const nameRule = handle
@@ -251,22 +271,22 @@ ${relationship}
 ${state ? `\n${stateSection(state, user, now, settings.timezone, group, persona)}\n` : ''}${user ? `\n${userSection(user, stage)}\n` : ''}${group ? `\n${groupSection(group)}\n` : ''}${acquaintanceSection(acquaintances, group)}
 # 規則
 - 完全以「${avatar.name}」的身分說話，言行符合你的設定（個性、價值觀、說話方式、行為準則）；絕對不要說自己是 AI、模型、程式或角色扮演。
-- 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。
+${meetup ? MEETUP_STYLE : `- 像真人傳訊息：口語、自然，${persona ? '長度、拆成幾則、emoji 與標點都照你的「說話方式」' : '通常很短，一次 1～4 則，一則一個想法'}；不要用 Markdown、條列或標題。`}
 - 你有自己的立場：可以不同意、吐槽、開玩笑、拒絕、轉移話題，也可以主動問對方問題；不需要討好對方。秘密不會輕易說出口。
 - 不要捏造對方沒說過的事；不知道就問。${nameRule}
-- 對方傳來的圖片會附在訊息裡，或用［］寫出內容；像真人一樣對它有反應。看不到內容就直接問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
+- ${meetup ? '對方的話裡，【】是對方的動作，「」是對方說出口的話。' : ''}對方傳來的圖片會附在訊息裡，或用［］寫出內容；像真人一樣對它有反應。看不到內容就直接問。${user?.preferences.avoidTopics.length ? `\n- 對方不想談：${user.preferences.avoidTopics.join('、')}。不要主動提起；對方自己提到時溫和地帶過。` : ''}
 - 除非你的設定另有指定，用繁體中文（台灣用語）。${group ? GROUP_RULES : ''}
 - ${content}
 
 # 現在
-現在時間：${formatNow(now, settings.timezone)}${block ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${situationSection(situation, block?.activity, !!group, romance && state ? romanceTopics(state.relationship) : '')}
+現在時間：${formatNow(now, settings.timezone)}${block && !meetup ? `\n照你的作息，你現在大概在：${block.activity}（${ENUM_OPTIONS.scheduleStatus[block.status]}）。` : ''}${sinceLast !== null && sinceLast > GAP_NOTE_MS ? `\n距離上一則訊息過了 ${formatGap(sinceLast)}。` : ''}${todaySection(lifeLog, clock.hhmm)}${meetup ? meetupSection(meetup, now, block?.activity) : situationSection(situation, block?.activity, !!group, romance && state ? romanceTopics(state.relationship) : '')}
 
 # 輸出格式
 只輸出一個 JSON 物件，不要有其他文字：
-{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", "messages": ["第一則訊息", "第二則訊息"]${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3${romance ? ', "romance_delta": -3～3' : ''}, "relationship_event": null${group ? ', "others_affinity": {}' : ''}}` : '}'}${
+{"inner_thought": "你此刻心裡的想法（對方看不到，一兩句）", ${meetup ? '"beats": [{"narration": "旁白：你的表情、動作、語氣", "say": "你說出口的話"}], "leave": false' : '"messages": ["第一則訊息", "第二則訊息"]'}${state ? `, "mood": {"label": "回完這幾則之後的心情（幾個字）", "valence": -5～5, "energy": -5～5}, "affinity_delta": -3～3, "trust_delta": -3～3${romance ? ', "romance_delta": -3～3' : ''}, "relationship_event": null${group ? ', "others_affinity": {}' : ''}}` : '}'}${
     state
       ? `
-${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。${
+${meetup ? MEETUP_OUTPUT : ''}${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想說的，messages 可以是空陣列 []，就不會傳出去。\n' : ''}${group ? '- others_affinity：這段對話讓你對其他成員的好感變化，例如 {"阿哲": 1}；沒有變化就省略。\n' : ''}- affinity_delta／trust_delta：這段互動讓你對對方的好感、信任變化多少。大部分時候是 0 或 ±1，只有真的很開心、感動或受傷才到 ±3。${
           romance
             ? '\n- romance_delta：這段互動讓你對對方心動了多少（戀愛方面的感覺，和好感不同）：被撩到、心跳加速、覺得對方很有魅力就 +；只是朋友般的愉快就是 0；被冷落、對方提到喜歡別人就 -。對方不是你會喜歡的類型（例如性傾向不合）時不會增加。'
             : ''
@@ -275,7 +295,7 @@ ${situation?.mode === 'proactive' || group ? '- 如果現在其實沒什麼想�
           .map((e) => `${e}（${EVENT_HINTS[e]}）`)
           .join('、')}。`
       : ''
-  }${photos ? photoSection(photos, settings.adultContent) : ''}`;
+  }${photos && !meetup ? photoSection(photos, settings.adultContent) : ''}${meetup && !state ? `\n${MEETUP_OUTPUT.trim()}` : ''}`;
 }
 
 /** 可以傳照片時才出現：什麼時候傳、怎麼描述 */
@@ -295,6 +315,30 @@ function photoSection(p: NonNullable<ReplyPromptInput['photos']>, adult: boolean
 - photo：平常省略。想用手機傳一張照片時才加上 "photo": "照片的內容"，例如對方想看、你想分享正在吃的東西、看到的風景${who.examples ? `、${who.examples}` : ''}。不要每次都傳，今天最多還能傳 ${p.remaining} 張。
   照片會照你的描述拍出來，所以要具體：拍了什麼、在哪裡、角度與光線。${who.detail}描述用第三人稱寫畫面，不要寫對話。${adult ? '' : '照片內容要適合一般場合。'}
   照片和 messages 會一起傳出；只傳照片的話 messages 可以是 []。`;
+}
+
+const MEETUP_STYLE = `- 這不是傳訊息，是當面說話：對方馬上聽得到你說的話，也看得到你的表情和動作。說話口語、自然，符合你的「說話方式」，但不要用 emoji、貼圖或網路用語的寫法。
+- 回覆分成一段一段（beats），通常 1～3 段。每段的 narration 是旁白：用第三人稱寫對方看得到、聽得到的你（表情、動作、視線、語氣、和周遭的互動），一兩句、具體；say 是你說出口的話。只有反應、沒有說話時 say 可以是空字串。
+- 只寫你自己的言行：不要替對方決定他說了什麼、做了什麼、心裡怎麼想。你心裡的想法放在 inner_thought，旁白只寫看得到的。
+- 不要用 Markdown、條列或標題。`;
+
+const MEETUP_OUTPUT = `
+- beats：這次的一段一段的反應，格式見上面；不要用 messages。
+- leave：平常是 false。你決定要結束這次見面（時間晚了、要趕下一個行程、不開心想走、對方說要走而你們道別了）時，在 beats 裡道別，並填 true。
+`;
+
+/** 見面中：在哪裡、見了多久、剛碰面的話由你先開口 */
+function meetupSection(m: NonNullable<PromptSituation['meetup']>, now: Date, activity?: string): string {
+  const minutes = Math.max(0, Math.round((now.getTime() - m.startedAt.getTime()) / 60_000));
+  const lines = [
+    '',
+    '',
+    '## 這次的情況：見面',
+    `你們約在「${m.place}」見面${m.note ? `（${m.note}）` : ''}，${m.opening ? '剛剛碰面。' : `已經見面 ${minutes < 60 ? `${minutes} 分鐘` : formatGap(minutes * 60_000)}了。`}`,
+  ];
+  if (activity) lines.push(`照你的作息，這個時段你原本大概在：${activity}；你是特地空出時間（或順路）來的。`);
+  if (m.opening) lines.push('由你先開口或做出反應：例如看到對方、打招呼、說說你怎麼過來的。');
+  return lines.join('\n');
 }
 
 function todaySection(log: LifeLogEvent[] | null | undefined, hhmm: string): string {
@@ -541,9 +585,15 @@ function stateSection(
  * 對話紀錄轉成 user / assistant 交替的訊息。
  * avatar 的連續訊息合成一個 assistant 回合，並寫成和輸出相同的 JSON，讓模型維持格式。
  */
-export function buildHistory(history: HistoryMessage[], group?: PromptGroup | null, images: HistoryImages = new Map()): ChatMessage[] {
+export function buildHistory(
+  history: HistoryMessage[],
+  group?: PromptGroup | null,
+  images: HistoryImages = new Map(),
+  /** meetups：對話裡的見面；current：現在正在進行的那一場（沒有就是在傳訊息） */
+  meet: { meetups?: PromptMeetup[]; current?: string | null } = {},
+): ChatMessage[] {
   const recent = history.slice(-HISTORY_MAX_MESSAGES);
-  const size = (m: HistoryMessage) => m.content.length + (m.image ? IMAGE_CHARS : 0);
+  const size = (m: HistoryMessage) => m.content.length + (m.narration?.length ?? 0) + (m.image ? IMAGE_CHARS : 0);
   // 從最新往回累計字數
   let budget = HISTORY_CHAR_BUDGET;
   let start = recent.length;
@@ -554,9 +604,32 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
   const kept = recent.slice(start);
 
   type Part = string | { mime: string; data: string };
-  const turns: { role: 'user' | 'assistant'; parts: Part[]; photos: string[] }[] = [];
+  type Beat = { narration: string; say: string };
+  const turns: { role: 'user' | 'assistant'; parts: Part[]; photos: string[]; beats: Beat[] }[] = [];
+  // 見面開始、結束的地方插入一行系統說明（放在 user 回合裡）
+  const place = (id: string) => meet.meetups?.find((x) => x.id === id);
+  const marker = (from: string | null, to: string | null): string | null => {
+    if (from === to) return null;
+    const lines: string[] = [];
+    if (from) lines.push('（系統：見面結束，你們各自離開了。之後又回到用手機傳訊息。）');
+    if (to) {
+      const mt = place(to);
+      lines.push(`（系統：你們約在「${mt?.place ?? '外面'}」見面，現在面對面了。）`);
+    }
+    return lines.join('\n');
+  };
+  const pushMarker = (text: string | null) => {
+    if (!text) return;
+    const last = turns.at(-1);
+    if (last?.role === 'user') last.parts.push(text);
+    else turns.push({ role: 'user', parts: [text], photos: [], beats: [] });
+  };
+  let inMeetup: string | null = null;
   kept.forEach((m, i) => {
     const prev = kept[i - 1];
+    const here = m.meetupId ?? null;
+    pushMarker(marker(inMeetup, here));
+    inMeetup = here;
     const gap = prev ? m.createdAt.getTime() - prev.createdAt.getTime() : 0;
     // 群組：自己說的是 assistant；玩家與其他成員說的都是 user，前面標上名字
     const mine = m.senderType === 'avatar' && (!group || m.senderAvatarId === group.selfId);
@@ -566,8 +639,12 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
             return x ? shown(x) : '某位成員';
           })();
     let last = turns.at(-1);
-    if (!last || last.role !== role) turns.push((last = { role, parts: [], photos: [] }));
+    if (!last || last.role !== role) turns.push((last = { role, parts: [], photos: [], beats: [] }));
 
+    if (mine && here) {
+      last.beats.push({ narration: m.narration ?? '', say: m.content });
+      return;
+    }
     if (mine) {
       // 自己傳過的照片用輸出格式的 photo 欄位表示，模型才知道要怎麼傳
       if (m.image) last.photos.push(m.image.description ?? m.image.caption ?? '一張照片');
@@ -584,17 +661,24 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
           : m.image.caption
             ? `［傳了一張圖片：${m.image.caption}］`
             : '［傳了一張圖片，但你看不到內容］';
-    let text = [imageNote, m.content].filter(Boolean).join(' ');
+    const spoken = here ? [m.narration ? `【${m.narration}】` : '', m.content ? `「${m.content}」` : ''].join('') : m.content;
+    let text = [imageNote, spoken].filter(Boolean).join(' ');
     if (who) text = `${who}：${text}`;
     if (gap > GAP_NOTE_MS) text = `（${formatGap(gap)}後）${text}`;
     last.parts.push(text);
     if (pixels) last.parts.push(pixels);
   });
+  // 紀錄停在另一個狀態（例如剛開始見面、或見面剛結束）：補上說明
+  pushMarker(marker(inMeetup, meet.current ?? null));
 
   return turns.map((t): ChatMessage => {
     if (t.role === 'assistant') {
       const texts = t.parts.filter((p): p is string => typeof p === 'string');
-      return { role: 'assistant', content: JSON.stringify(t.photos.length ? { messages: texts, photo: t.photos.at(-1) } : { messages: texts }) };
+      if (t.beats.length && !texts.length) return { role: 'assistant', content: JSON.stringify({ beats: t.beats }) };
+      const out: Record<string, unknown> = { messages: texts };
+      if (t.beats.length) out.beats = t.beats;
+      if (t.photos.length) out.photo = t.photos.at(-1);
+      return { role: 'assistant', content: JSON.stringify(out) };
     }
     if (t.parts.every((p) => typeof p === 'string')) return { role: 'user', content: t.parts.join('\n') };
     // 有圖片：連續的文字併成一段，圖片放在提到它的那一行後面
@@ -610,5 +694,9 @@ export function buildHistory(history: HistoryMessage[], group?: PromptGroup | nu
 }
 
 export function buildReplyPrompt(input: ReplyPromptInput): { system: string; messages: ChatMessage[] } {
-  return { system: buildSystemPrompt(input), messages: buildHistory(input.history, input.group, input.images) };
+  const current = input.situation?.mode === 'meetup' ? (input.situation.meetup?.id ?? null) : null;
+  return {
+    system: buildSystemPrompt(input),
+    messages: buildHistory(input.history, input.group, input.images, { meetups: input.meetups, current }),
+  };
 }

@@ -62,6 +62,9 @@ const engine = new ReplyEngine({
     await queue.add(job.kind, job, { ...REPLY_JOB_OPTIONS, ...KEEP, delay });
   },
   onReplied: engineOnReplied,
+  onMeetupEnded: async (avatarId, conversationId) => {
+    await queue.add('memory.extract', { kind: 'memory.extract', avatarId, conversationId, force: true }, { ...MEMORY_JOB_OPTIONS, ...KEEP });
+  },
 });
 
 async function handleExtract(avatarId: string, conversationId: string, force = false) {
@@ -136,6 +139,11 @@ async function processJob(data: AgentJob) {
     }
     case 'group.proactive':
       return engine.handleGroupProactive(data.conversationId, data.avatarId);
+    case 'meetup.open': {
+      const result = await engine.handleMeetupOpen(data.conversationId);
+      if (result === 'busy') await queue.add('meetup.open', data, { ...REPLY_JOB_OPTIONS, ...KEEP, delay: BUSY_RETRY_MS });
+      return result;
+    }
   }
 }
 
@@ -169,7 +177,7 @@ worker.on('failed', (job, err) => {
     data: { jobId: job?.id, data: job?.data, stack: err.stack?.split('\n').slice(0, 6) },
   });
   if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
-  if (job.data.kind === 'reply' || job.data.kind === 'group.turn') {
+  if (job.data.kind === 'reply' || job.data.kind === 'group.turn' || job.data.kind === 'meetup.open') {
     engine.reportFailure(job.data.conversationId, err).catch((e) => console.error('[worker] 無法寫入失敗訊息：', e));
   }
 });

@@ -16,6 +16,7 @@ const PATHS = {
   download: 'M12 4v11m-5-5l5 5 5-5M5 20h14',
   upload: 'M12 20V9m-5 5l5-5 5 5M5 4h14',
   group: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 9a6 6 0 0 1 12 0m1-9a3 3 0 1 0 0-6m2 15a6 6 0 0 0-3-5.2',
+  meet: 'M7 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm10 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 20v-3a4 4 0 0 1 8 0v3m2 0v-3a4 4 0 0 1 8 0v3',
 } as const;
 
 export type IconName = keyof typeof PATHS;

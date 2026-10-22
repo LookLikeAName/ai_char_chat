@@ -27,6 +27,8 @@ export function messageToDto(m: MessageRow): MessageDto {
           description: m.meta.image.description ?? null,
         }
       : null,
+    narration: m.meta.narration ?? null,
+    meetupId: m.meta.meetupId ?? null,
   };
 }
 

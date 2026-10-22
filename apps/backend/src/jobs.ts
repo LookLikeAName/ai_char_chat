@@ -14,6 +14,8 @@ export type AgentJob =
   | { kind: 'proactive'; avatarId: string; conversationId: string }
   /** 群組：玩家發話後的一輪（重複投遞是安全的） */
   | { kind: 'group.turn'; conversationId: string; force?: boolean }
+  /** 剛開始見面：由 avatar 先開口 */
+  | { kind: 'meetup.open'; conversationId: string }
   /** 群組：某個 avatar 主動開話題 */
   | { kind: 'group.proactive'; conversationId: string; avatarId: string };
 

@@ -29,3 +29,9 @@ export function typingMs(text: string, random: Random, speed: keyof typeof TYPIN
 export function betweenMessagesMs(random: Random): number {
   return 300 + Math.round(random() * 600);
 }
+
+/** 見面時兩段之間的停頓：等對方大概聽完、看完上一段（每字約 60ms），介於 0.6～3.5 秒 */
+export function beatPauseMs(prev: { narration: string; say: string }, random: Random): number {
+  const chars = [...prev.say].length + [...prev.narration].length / 2;
+  return Math.min(3500, Math.max(600, jitter(400 + chars * 60, random)));
+}

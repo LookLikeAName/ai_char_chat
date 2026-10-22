@@ -45,6 +45,8 @@ export async function extractMemories(
       content: messages.content,
       createdAt: messages.createdAt,
       image: sql<MessageImage | null>`${messages.meta}->'image'`,
+      meetupId: sql<string | null>`${messages.meta}->>'meetupId'`,
+      narration: sql<string | null>`${messages.meta}->>'narration'`,
     })
     .from(messages)
     .where(
@@ -80,7 +82,9 @@ export async function extractMemories(
     .map((m) => {
       const who = m.senderType === 'user' ? '對方' : m.senderAvatarId === avatar.id ? '我' : (names.get(m.senderAvatarId ?? '') ?? '其他人');
       const img = m.image ? `［${m.senderType === 'avatar' ? '照片' : '圖片'}：${m.image.description ?? m.image.caption ?? '看不到內容'}］` : '';
-      return `[${formatNow(m.createdAt, settings.timezone)}] ${who}：${[img, m.content].filter(Boolean).join(' ')}`;
+      // 見面時當面說的：標出來，旁白寫在【】裡
+      const said = m.meetupId ? `（見面時）${m.narration ? `【${m.narration}】` : ''}${m.content ? `「${m.content}」` : ''}` : m.content;
+      return `[${formatNow(m.createdAt, settings.timezone)}] ${who}：${[img, said].filter(Boolean).join(' ')}`;
     })
     .join('\n');
   const impression = await latestImpression(db, avatar.id);
@@ -101,7 +105,7 @@ ${transcript}
 # 任務
 以你（${avatar.name}）的角度，挑出之後值得記得的事，最多 ${MAX_MEMORIES} 件：
 - 對方的近況、計畫、喜好、在意的事、說過的重要的話
-- 你們之間發生的事（約定、玩笑梗、吵架、感動的時刻）
+- 你們之間發生的事（約定、玩笑梗、吵架、感動的時刻）；標「（見面時）」的是你們約出來當面說的，記的時候寫出是見面時發生的（例如「我們在咖啡廳見面時，對方…」）
 - 你自己說過、之後要記得的事（例如答應了什麼）${
     member.type === 'group'
       ? '\n- 群組裡其他成員的事：他們是做什麼的、喜好、近況、你們之間的互動（寫出名字，例如「阿哲說他在設計公司上班，很怕冷」）'
