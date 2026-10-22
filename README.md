@@ -134,6 +134,8 @@ docker compose up -d --build
 - `APP_SECRET` 用來加密 API key；**改掉之後已存的 key 會解不開**，要重新輸入。
 - 本機模型：`docker compose --profile local up -d` 會多啟動 Ollama；LLM 設定檔選「OpenAI 相容端點」，Base URL 填 `http://ollama:11434/v1`。
 - 資料在 Docker volume（`pgdata`、`redisdata`、`media`）；`docker compose down` 不會刪除，`down -v` 才會。
+- 更新程式碼後用 `docker compose up -d --build` 重建。關機或休眠前建議先 `docker compose stop`，讓資料庫正常關閉；沒關好的話下次開機資料庫要先自我復原（log 會出現 `automatic recovery in progress`），api 和 worker 會等它好了才啟動，通常幾十秒內。
+- 開機後網頁一直顯示錯誤（502）時，先看 `docker compose ps` 是不是有服務一直重啟，再看 `docker compose logs api worker postgres`。
 
 ## 開發
 

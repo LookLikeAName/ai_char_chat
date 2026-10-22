@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { SecretBox } from './crypto.ts';
-import { createDb, runMigrations } from './db/client.ts';
+import { createDb, runMigrations, waitForDb } from './db/client.ts';
 import { RedisEventPublisher, subscribeEvents } from './events/bus.ts';
 import { AGENT_QUEUE, REPLY_JOB_OPTIONS, type AgentJob, type JobQueue } from './jobs.ts';
 import { setupObservability } from './observabilitySetup.ts';
@@ -12,6 +12,7 @@ import { WsHub } from './ws.ts';
 
 const config = loadConfig();
 const { db, pool } = createDb(config.databaseUrl);
+await waitForDb(pool);
 await runMigrations(db);
 
 const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });

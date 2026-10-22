@@ -4,7 +4,7 @@ import { Redis } from 'ioredis';
 import { utilityBinding } from '@acc/shared';
 import { loadConfig } from './config.ts';
 import { SecretBox } from './crypto.ts';
-import { createDb } from './db/client.ts';
+import { createDb, waitForDb } from './db/client.ts';
 import { avatars } from './db/schema.ts';
 import { RedisEventPublisher, WORKER_HEARTBEAT_KEY } from './events/bus.ts';
 import { AGENT_QUEUE, MEMORY_JOB_OPTIONS, REPLY_JOB_OPTIONS, type AgentJob } from './jobs.ts';
@@ -31,6 +31,8 @@ const KEEP = { removeOnComplete: 1000, removeOnFail: 1000 };
 
 const config = loadConfig();
 const { db, pool } = createDb(config.databaseUrl);
+// 開機時資料庫可能還在復原，等它可以連線再開始
+await waitForDb(pool);
 const box = new SecretBox(config.appSecret);
 const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
 const queue = new Queue<AgentJob>(AGENT_QUEUE, { connection: redis });

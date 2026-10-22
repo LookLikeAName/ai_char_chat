@@ -49,6 +49,7 @@
 - worker 產生訊息後透過 Redis pub/sub 通知 api，再由 api 推給瀏覽器。
 - 上傳檔案放在 volume `media`；API key 以 `APP_SECRET`（`.env`）加密後存進資料庫。
 - 時區：玩家在設定裡選一個時區，所有作息與勿擾時段都用這個時區計算。
+- 開機順序：Docker 重開後用 restart policy 拉起容器時不看 `depends_on`，所有服務同時啟動，而資料庫沒正常關閉時還要先自我復原。所以 api 和 worker 啟動時先等資料庫可以連線（`waitForDb`，最多 3 分鐘）再跑 migration；nginx 每次轉發都重新解析 `api` 的位址，api 重建換了 IP 也不會一直 502。
 
 ### Repo 結構（npm workspaces）
 
